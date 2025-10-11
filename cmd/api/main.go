@@ -7,16 +7,17 @@ import (
 	"syscall"
 
 	"github.com/pardnchiu/go-faas/internal"
+	"github.com/pardnchiu/go-faas/internal/docker"
 )
 
 func main() {
 	// * initialize 5 containers for running scripts and minus cold start time
-	ctList, err := internal.InitDocker()
+	ctList, err := docker.InitDocker()
 	if err != nil {
 		slog.Error("Failed to initialize Docker", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
-	defer internal.StopContainer(ctList)
+	defer docker.Stop(ctList)
 
 	channel := make(chan os.Signal, 1)
 	signal.Notify(channel, os.Interrupt, syscall.SIGTERM)
@@ -24,7 +25,7 @@ func main() {
 	// * listen for signal to shutdown containers
 	go func() {
 		<-channel
-		internal.StopContainer(ctList)
+		docker.Stop(ctList)
 	}()
 
 	// * initialize router and start server

@@ -4,20 +4,18 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pardnchiu/go-faas/internal/docker"
 )
 
 var (
-	ctIdx   uint64 = 0
-	ctList         = []string{}
-	langMap        = map[string]string{
+	langMap = map[string]string{
 		".py": "python",
 		".js": "javascript",
 		".ts": "typescript",
@@ -29,21 +27,12 @@ var (
 	}
 )
 
-func InitCTList(list []string) {
-	ctList = list
-}
-
-func getCT() string {
-	nextIdx := atomic.AddUint64(&ctIdx, 1) % uint64(len(ctList))
-	return ctList[nextIdx]
-}
-
 func Run(c *gin.Context) {
 	targetPath := c.Param("targetPath")
 	targetPath = strings.TrimPrefix(targetPath, "/")
 
 	// TODO: use database to manage scripts
-	log.Printf("Run script: %s", targetPath)
+	slog.Info("Run script", slog.String("path", targetPath))
 	if strings.Contains(targetPath, "..") {
 		c.String(http.StatusBadRequest, "Invalid path")
 		return
@@ -84,11 +73,13 @@ func Run(c *gin.Context) {
 }
 
 func runScript(path, lang, input string) (string, error) {
+	ct := docker.Get()
+	defer docker.Release(ct)
+
 	runtime := runtimeMap[lang]
 	ctPath := filepath.Join("/app", path)
-	ctName := getCT()
 
-	cmd := exec.Command("docker", "exec", ctName, runtime, ctPath, input)
+	cmd := exec.Command("docker", "exec", ct, runtime, ctPath, input)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
