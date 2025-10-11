@@ -12,6 +12,15 @@ Content-Type: application/json
   "name": "Pardn"
 }
 
+POST http://localhost:8080/run/test.py
+Content-Type: application/json
+
+{
+  "name": "Pardn"
+}
+
+
+// * invalid path test
 POST http://localhost:8080/run/../test.py
 Content-Type: application/json
 

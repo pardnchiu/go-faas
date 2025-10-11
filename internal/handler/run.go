@@ -4,24 +4,38 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 
 	"github.com/gin-gonic/gin"
 )
 
-var langMap = map[string]string{
-	".py": "python",
-	".js": "javascript",
-	".ts": "typescript",
+var (
+	ctIdx   uint64 = 0
+	ctList         = []string{}
+	langMap        = map[string]string{
+		".py": "python",
+		".js": "javascript",
+		".ts": "typescript",
+	}
+	runtimeMap = map[string]string{
+		"python":     "python3",
+		"javascript": "node",
+		"typescript": "tsx",
+	}
+)
+
+func InitCTList(list []string) {
+	ctList = list
 }
-var runtimeMap = map[string]string{
-	"python":     "python3",
-	"javascript": "node",
-	"typescript": "tsx",
+
+func getCT() string {
+	nextIdx := atomic.AddUint64(&ctIdx, 1) % uint64(len(ctList))
+	return ctList[nextIdx]
 }
 
 func Run(c *gin.Context) {
@@ -29,22 +43,15 @@ func Run(c *gin.Context) {
 	targetPath = strings.TrimPrefix(targetPath, "/")
 
 	// TODO: use database to manage scripts
-	targetPath = filepath.Join("script", targetPath)
+	log.Printf("Run script: %s", targetPath)
 	if strings.Contains(targetPath, "..") {
 		c.String(http.StatusBadRequest, "Invalid path")
 		return
 	}
-	targetPath, err := filepath.Abs(targetPath)
-	if err != nil {
-		c.String(http.StatusBadRequest, "Failed to get absolute path")
-		return
-	}
-	if _, err := os.Stat(targetPath); os.IsNotExist(err) {
-		c.String(http.StatusNotFound, "Failed to find the script")
-		return
-	}
+	targetPath = filepath.Join("script", targetPath)
+
 	// * directly pass request body to script
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 10<<20) // 10MB
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 10<<20)
 	reqBody, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		c.String(http.StatusBadRequest, "Failed to read request body")
@@ -78,10 +85,10 @@ func Run(c *gin.Context) {
 
 func runScript(path, lang, input string) (string, error) {
 	runtime := runtimeMap[lang]
-	if _, err := exec.LookPath(runtime); err != nil {
-		return "", fmt.Errorf("%s not found", runtime)
-	}
-	cmd := exec.Command(runtime, path, input)
+	ctPath := filepath.Join("/app", path)
+	ctName := getCT()
+
+	cmd := exec.Command("docker", "exec", ctName, runtime, ctPath, input)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {

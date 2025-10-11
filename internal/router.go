@@ -5,9 +5,10 @@ import (
 	"github.com/pardnchiu/go-faas/internal/handler"
 )
 
-func InitRouter() error {
+func InitRouter(ctList []string) error {
 	r := gin.Default()
 
+	handler.InitCTList(ctList)
 	r.POST("/run/*targetPath", handler.Run)
 
 	return r.Run(":8080")
