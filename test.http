@@ -1,0 +1,20 @@
+POST http://localhost:8080/run/test.ts
+Content-Type: application/json
+
+{
+  "name": "Pardn"
+}
+
+POST http://localhost:8080/run/test.js
+Content-Type: application/json
+
+{
+  "name": "Pardn"
+}
+
+POST http://localhost:8080/run/../test.py
+Content-Type: application/json
+
+{
+  "name": "Pardn"
+}
