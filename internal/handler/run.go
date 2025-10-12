@@ -77,9 +77,14 @@ func runScript(path, lang, input string) (string, error) {
 	defer docker.Release(ct)
 
 	runtime := runtimeMap[lang]
+
+	// * add wrapper to handle input
+	ext := filepath.Ext(path)
+	wrapPath := fmt.Sprintf("/app/wrapper%s", ext)
 	ctPath := filepath.Join("/app", path)
 
-	cmd := exec.Command("docker", "exec", ct, runtime, ctPath, input)
+	cmd := exec.Command("docker", "exec", "-i", ct, runtime, wrapPath, ctPath)
+	cmd.Stdin = strings.NewReader(input)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {

@@ -5,4 +5,9 @@ RUN apk add --no-cache python3 py3-pip && \
 
 WORKDIR /app
 
+# * copy wrapper
+COPY internal/resource/wrapper.js /app/wrapper.js
+COPY internal/resource/wrapper.py /app/wrapper.py
+COPY internal/resource/wrapper.ts /app/wrapper.ts
+
 CMD ["sleep", "infinity"]
