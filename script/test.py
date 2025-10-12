@@ -1,1 +1,0 @@
-print(f"Hello {event['name']}! This is Python.")

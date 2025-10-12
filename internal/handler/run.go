@@ -7,21 +7,26 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pardnchiu/go-faas/internal/database"
 	"github.com/pardnchiu/go-faas/internal/docker"
 )
 
 var (
-	scriptTimeout = 30 * time.Second
-	langMap       = map[string]string{
-		".py": "python",
-		".js": "javascript",
-		".ts": "typescript",
+	redisTimeout        = 5 * time.Second
+	scriptTimeout       = 30 * time.Second
+	scriptMax     int64 = 10 << 20
+	extMap              = map[string]string{
+		"python":     ".py",
+		"javascript": ".js",
+		"typescript": ".ts",
 	}
 	runtimeMap = map[string]string{
 		"python":     "python3",
@@ -34,32 +39,45 @@ func Run(c *gin.Context) {
 	targetPath := c.Param("targetPath")
 	targetPath = strings.TrimPrefix(targetPath, "/")
 
-	// TODO: use database to manage scripts
-	slog.Info("Run script", slog.String("path", targetPath))
-	if strings.Contains(targetPath, "..") {
-		c.String(http.StatusBadRequest, "Invalid path")
-		return
+	queryVersion := c.Query("version")
+	var version int64
+	if queryVersion != "" {
+		// * version invalid, use latest
+		v, err := strconv.ParseInt(queryVersion, 10, 64)
+		if err == nil {
+			version = v
+		}
 	}
-	targetPath = filepath.Join("script", targetPath)
 
 	// * directly pass request body to script
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 10<<20)
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, scriptMax)
 	reqBody, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		c.String(http.StatusBadRequest, "Failed to read request body")
 		return
 	}
 
-	// TODO: check by database record
-	ext := strings.ToLower(filepath.Ext(targetPath))
-	lang := langMap[ext]
-	if lang == "" {
-		c.String(http.StatusBadRequest, "Unsupported file type")
+	ctx, cancel := context.WithTimeout(context.Background(), redisTimeout)
+	defer cancel()
+
+	scriptData, err := database.DB.Get(ctx, targetPath, version)
+	if err != nil {
+		slog.Warn("function not found in redis",
+			slog.String("path", targetPath),
+			slog.String("error", err.Error()),
+		)
+		c.String(http.StatusNotFound, "Function not found")
 		return
 	}
 
-	// * run script
-	output, err := runScript(targetPath, lang, string(reqBody))
+	slog.Info("run function",
+		slog.String("path", targetPath),
+		slog.String("language", scriptData.Language),
+		slog.Int64("version", scriptData.Timestamp),
+	)
+
+	// * change to use directly code
+	output, err := runScript(scriptData.Code, scriptData.Language, string(reqBody))
 	if err != nil {
 		c.String(http.StatusInternalServerError, fmt.Sprintf("Failed to run script: %s", err.Error()))
 		return
@@ -75,16 +93,23 @@ func Run(c *gin.Context) {
 	c.String(http.StatusOK, output)
 }
 
-func runScript(path, lang, input string) (string, error) {
+func runScript(code, lang, input string) (string, error) {
 	ct := docker.Get()
 	defer docker.Release(ct)
 
 	runtime := runtimeMap[lang]
+	ext := extMap[lang]
 
-	// * add wrapper to handle input
-	ext := filepath.Ext(path)
+	// Write code to local temp file (mounted in container)
+	tempFile := fmt.Sprintf("temp_%d%s", time.Now().UnixNano(), ext)
+	localPath := filepath.Join("temp", tempFile)
+
+	if err := os.WriteFile(localPath, []byte(code), 0644); err != nil {
+		return "", fmt.Errorf("failed to write code: %w", err)
+	}
+	defer os.Remove(localPath)
 	wrapPath := fmt.Sprintf("/app/wrapper%s", ext)
-	ctPath := filepath.Join("/app", path)
+	ctPath := filepath.Join("/app/temp", tempFile)
 
 	// * add 30s timeout context
 	ctx, cancel := context.WithTimeout(context.Background(), scriptTimeout)

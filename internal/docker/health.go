@@ -9,6 +9,11 @@ import (
 	"time"
 )
 
+var (
+	tickerPeriod = 30 * time.Second
+	checkTimeout = 5 * time.Second
+)
+
 func healthCheck(list []string) {
 	ticker := time.NewTicker(tickerPeriod)
 	defer ticker.Stop()

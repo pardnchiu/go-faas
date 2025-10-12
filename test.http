@@ -1,26 +1,45 @@
-POST http://localhost:8080/run/test.ts
+POST http://localhost:8080/upload
+Content-Type: application/json
+
+{
+  "path": "test/javascript",
+  "language": "javascript",
+  "code": "console.log(`Hello ${event.name}! This is JavaScript.`);"
+}
+
+POST http://localhost:8080/run/test/javascript
 Content-Type: application/json
 
 {
   "name": "Pardn"
 }
 
-POST http://localhost:8080/run/test.js
+POST http://localhost:8080/upload
+Content-Type: application/json
+
+{
+  "path": "test/typescript",
+  "language": "typescript",
+  "code": "console.log(`Hello ${event.name}! This is TypeScript.`);"
+}
+
+POST http://localhost:8080/run/test/typescript
 Content-Type: application/json
 
 {
   "name": "Pardn"
 }
 
-POST http://localhost:8080/run/test.py
+POST http://localhost:8080/upload
 Content-Type: application/json
 
 {
-  "name": "Pardn"
+  "path": "test/python",
+  "language": "python",
+  "code": "print(f\"Hello {event['name']}! This is Python.\")"
 }
 
-// * invalid path test
-POST http://localhost:8080/run/../test.py
+POST http://localhost:8080/run/test/python
 Content-Type: application/json
 
 {

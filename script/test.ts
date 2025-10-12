@@ -1,1 +1,0 @@
-console.log(`Hello ${event.name}! This is TypeScript.`);

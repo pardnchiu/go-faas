@@ -8,6 +8,7 @@ import (
 func InitRouter(ctList []string) error {
 	r := gin.Default()
 
+	r.POST("/upload", handler.Upload)
 	r.POST("/run/*targetPath", handler.Run)
 
 	return r.Run(":8080")

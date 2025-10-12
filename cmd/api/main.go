@@ -7,10 +7,26 @@ import (
 	"syscall"
 
 	"github.com/pardnchiu/go-faas/internal"
+	"github.com/pardnchiu/go-faas/internal/database"
 	"github.com/pardnchiu/go-faas/internal/docker"
 )
 
 func main() {
+	// * initialize database
+	db, err := database.InitDB(database.Config{
+		Redis: &database.Redis{
+			Host:     "localhost",
+			Port:     6379,
+			Password: "0123456789",
+			DB:       0,
+		},
+	})
+	if err != nil {
+		slog.Error("Failed to initialize database", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+	defer db.Close()
+
 	// * initialize 5 containers for running scripts and minus cold start time
 	ctList, err := docker.InitDocker()
 	if err != nil {

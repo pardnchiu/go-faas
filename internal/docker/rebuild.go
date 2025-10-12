@@ -19,7 +19,7 @@ func rebuild(name string) {
 		)
 		return
 	}
-	folderPath := filepath.Join(wd, "script")
+	folderPath := filepath.Join(wd, "temp")
 
 	exec.Command("docker", "stop", name).Run()
 	exec.Command("docker", "rm", name).Run()
@@ -27,8 +27,8 @@ func rebuild(name string) {
 	cmd := exec.Command("docker", "run",
 		"-d",
 		"--name", name,
-		"-v", fmt.Sprintf("%s:/app/script", folderPath),
-		"--health-cmd", "test -d /app/script || exit 1",
+		"-v", fmt.Sprintf("%s:/app/temp", folderPath),
+		"--health-cmd", "test -d /app/temp || exit 1",
 		"--health-interval", "10s",
 		"--health-timeout", "5s",
 		"--health-retries", "3",

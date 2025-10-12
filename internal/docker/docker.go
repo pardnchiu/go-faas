@@ -8,9 +8,7 @@ import (
 )
 
 const (
-	ctMax        = 5
-	tickerPeriod = 30 * time.Second
-	checkTimeout = 5 * time.Second
+	ctMax = 5
 )
 
 var (

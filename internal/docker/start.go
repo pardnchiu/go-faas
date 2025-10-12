@@ -15,7 +15,7 @@ func start(list []string) error {
 	if err != nil {
 		return fmt.Errorf("[startContainer-0: %v]", err)
 	}
-	folderPath := filepath.Join(wd, "script")
+	folderPath := filepath.Join(wd, "temp")
 
 	cmd := exec.Command("docker", "build",
 		"-t", "faas-runtime",
@@ -49,8 +49,8 @@ func start(list []string) error {
 			wgCmd := exec.Command("docker", "run",
 				"-d",
 				"--name", ctName,
-				"-v", fmt.Sprintf("%s:/app/script", folderPath),
-				"--health-cmd", "test -d /app/script || exit 1",
+				"-v", fmt.Sprintf("%s:/app/temp", folderPath),
+				"--health-cmd", "test -d /app/temp || exit 1",
 				"--health-interval", "10s",
 				"--health-timeout", "5s",
 				"--health-retries", "3",
