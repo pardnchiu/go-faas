@@ -3,12 +3,9 @@ package docker
 import (
 	"fmt"
 	"log/slog"
+	"runtime"
 	"sync"
 	"time"
-)
-
-const (
-	ctMax = 5
 )
 
 var (
@@ -18,8 +15,13 @@ var (
 )
 
 func InitDocker() ([]string, error) {
-	ctList := make([]string, ctMax)
-	for i := 0; i < ctMax; i++ {
+	cores := runtime.NumCPU()
+	if cores < 1 {
+		cores = 1
+	}
+
+	ctList := make([]string, cores*2)
+	for i := 0; i < cores*2; i++ {
 		ctList[i] = fmt.Sprintf("go-faas-runtime-%d", i)
 	}
 
