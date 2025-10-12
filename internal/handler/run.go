@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,13 +10,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/pardnchiu/go-faas/internal/docker"
 )
 
 var (
-	langMap = map[string]string{
+	scriptTimeout = 30 * time.Second
+	langMap       = map[string]string{
 		".py": "python",
 		".js": "javascript",
 		".ts": "typescript",
@@ -58,7 +61,7 @@ func Run(c *gin.Context) {
 	// * run script
 	output, err := runScript(targetPath, lang, string(reqBody))
 	if err != nil {
-		c.String(http.StatusInternalServerError, err.Error())
+		c.String(http.StatusInternalServerError, fmt.Sprintf("Failed to run script: %s", err.Error()))
 		return
 	}
 
@@ -83,11 +86,19 @@ func runScript(path, lang, input string) (string, error) {
 	wrapPath := fmt.Sprintf("/app/wrapper%s", ext)
 	ctPath := filepath.Join("/app", path)
 
-	cmd := exec.Command("docker", "exec", "-i", ct, runtime, wrapPath, ctPath)
+	// * add 30s timeout context
+	ctx, cancel := context.WithTimeout(context.Background(), scriptTimeout)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", ct, runtime, wrapPath, ctPath)
 	cmd.Stdin = strings.NewReader(input)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		// * timeout
+		if ctx.Err() == context.DeadlineExceeded {
+			return "", fmt.Errorf("execution timeout")
+		}
 		return "", fmt.Errorf("%s: %s", err, string(output))
 	}
 
