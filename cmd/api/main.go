@@ -1,86 +1,49 @@
 package main
 
 import (
+	"log"
 	"log/slog"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 
 	"github.com/joho/godotenv"
 	"github.com/pardnchiu/go-faas/internal"
+	"github.com/pardnchiu/go-faas/internal/container"
 	"github.com/pardnchiu/go-faas/internal/database"
-	"github.com/pardnchiu/go-faas/internal/docker"
 )
 
-func init() {
-	if err := godotenv.Load(); err != nil {
-		slog.Warn("Error loading .env file",
-			slog.String("error", err.Error()))
-	}
-}
-
-func getEnvWithDefault(key, defaultValue string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		return defaultValue
-	}
-	return value
-}
-
-func getEnvWithDefaultInt(key string, defaultValue int) int {
-	valueStr := os.Getenv(key)
-	if valueStr == "" {
-		return defaultValue
-	}
-	value, err := strconv.Atoi(valueStr)
-	if err != nil {
-		return defaultValue
-	}
-	return value
-}
-
 func main() {
-	host := getEnvWithDefault("REDIS_HOST", "localhost")
-	port := getEnvWithDefaultInt("REDIS_PORT", 6379)
-	password := getEnvWithDefault("REDIS_PASSWORD", "")
-	dbNum := getEnvWithDefaultInt("REDIS_DB", 0)
-
-	// * initialize db
-	db, err := database.InitDB(database.Config{
-		Redis: &database.Redis{
-			Host:     host,
-			Port:     port,
-			Password: password,
-			DB:       dbNum,
-		},
-	})
-	if err != nil {
-		slog.Error("Failed to initialize database", slog.String("error", err.Error()))
-		os.Exit(1)
+	// Load environment variables
+	if err := godotenv.Load(); err != nil {
+		slog.Warn("No .env file found, using environment variables")
 	}
-	defer db.Close()
 
-	// * initialize 5 containers for running scripts and minus cold start time
-	ctList, err := docker.InitDocker()
-	if err != nil {
-		slog.Error("Failed to initialize Docker", slog.String("error", err.Error()))
-		os.Exit(1)
+	// Initialize Redis database
+	if err := database.Init(); err != nil {
+		log.Fatalf("Failed to initialize database: %v", err)
 	}
-	defer docker.Stop(ctList)
+	defer database.Close()
 
-	channel := make(chan os.Signal, 1)
-	signal.Notify(channel, os.Interrupt, syscall.SIGTERM)
+	// Initialize Docker/Podman container pool
+	ctList, err := container.Init()
+	if err != nil {
+		log.Fatalf("Failed to initialize container pool: %v", err)
+	}
 
-	// * listen for signal to shutdown containers
+	// Setup graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
 	go func() {
-		<-channel
-		docker.Stop(ctList)
+		<-sigChan
+		slog.Info("Received shutdown signal, cleaning up...")
+		container.Stop(ctList)
 	}()
 
-	// * initialize router and start server
+	// Start HTTP server
+	slog.Info("Starting FaaS service on :8080")
 	if err := internal.InitRouter(ctList); err != nil {
-		slog.Error("Failed to start server", slog.String("error", err.Error()))
-		os.Exit(1)
+		log.Fatalf("Failed to start server: %v", err)
 	}
 }

@@ -1,10 +1,35 @@
-import * as fs from 'fs';
+#!/usr/bin/env tsx
 
-const input = fs.readFileSync(0, 'utf-8');
-const event = JSON.parse(input);
-
-(global as any).event = event;
-(global as any).input = event;
-
+// Read script path from command line
 const scriptPath = process.argv[2];
-require(scriptPath);
+
+if (!scriptPath) {
+  console.error('Usage: tsx wrapper.ts <script.ts>');
+  process.exit(1);
+}
+
+// Read stdin (input data)
+let inputData = '';
+process.stdin.setEncoding('utf8');
+
+process.stdin.on('data', (chunk) => {
+  inputData += chunk;
+});
+
+process.stdin.on('end', async () => {
+  try {
+    // Parse input JSON
+    const event = inputData ? JSON.parse(inputData) : {};
+    const input = event;
+
+    // Make event and input available globally
+    (global as any).event = event;
+    (global as any).input = input;
+
+    // Execute user script
+    await import(scriptPath);
+  } catch (error: any) {
+    console.error('Error:', error.message);
+    process.exit(1);
+  }
+});

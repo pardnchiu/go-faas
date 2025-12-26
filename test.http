@@ -1,3 +1,6 @@
+# API Test Suite
+
+### Test 1: Upload Script
 POST http://localhost:8080/upload
 Content-Type: application/json
 
@@ -7,6 +10,9 @@ Content-Type: application/json
   "code": "console.log(`Hello ${event.name}! This is JavaScript.`);"
 }
 
+###
+
+### Test 2: Run Saved Script
 POST http://localhost:8080/run/test/javascript
 Content-Type: application/json
 
@@ -14,34 +20,122 @@ Content-Type: application/json
   "name": "Pardn"
 }
 
-POST http://localhost:8080/upload
+###
+
+### Test 3: Run Now - Python
+POST http://localhost:8080/run-now
 Content-Type: application/json
 
 {
-  "path": "test/typescript",
-  "language": "typescript",
-  "code": "console.log(`Hello ${event.name}! This is TypeScript.`);"
-}
-
-POST http://localhost:8080/run/test/typescript
-Content-Type: application/json
-
-{
-  "name": "Pardn"
-}
-
-POST http://localhost:8080/upload
-Content-Type: application/json
-
-{
-  "path": "test/python",
   "language": "python",
-  "code": "print(f\"Hello {event['name']}! This is Python.\")"
+  "code": "import json\nresult = {'sum': event['a'] + event['b'], 'product': event['a'] * event['b']}\nprint(json.dumps(result))",
+  "input": "{\"a\": 10, \"b\": 5}"
 }
 
-POST http://localhost:8080/run/test/python
+###
+
+### Test 4: Run Now - JavaScript
+POST http://localhost:8080/run-now
 Content-Type: application/json
 
 {
-  "name": "Pardn"
+  "language": "javascript",
+  "code": "const data = event.items.filter(x => x > 50); console.log(JSON.stringify({filtered: data, count: data.length}));",
+  "input": "{\"items\": [20, 60, 45, 80, 30, 90]}"
 }
+
+###
+
+### Test 5: Run Now - TypeScript
+POST http://localhost:8080/run-now
+Content-Type: application/json
+
+{
+  "language": "typescript",
+  "code": "interface User { name: string; age: number; } const users: User[] = event.users; const adults = users.filter(u => u.age >= 18); console.log(JSON.stringify({adults: adults.map(u => u.name)}));",
+  "input": "{\"users\": [{\"name\": \"Alice\", \"age\": 25}, {\"name\": \"Bob\", \"age\": 16}, {\"name\": \"Charlie\", \"age\": 30}]}"
+}
+
+###
+
+### Test 6: Run Now - Error Handling (Syntax Error)
+POST http://localhost:8080/run-now
+Content-Type: application/json
+
+{
+  "language": "javascript",
+  "code": "console.log(undefined.property);",
+  "input": "{}"
+}
+
+###
+
+### Test 7: Run Now - Timeout Test (should fail after 30s)
+POST http://localhost:8080/run-now
+Content-Type: application/json
+
+{
+  "language": "python",
+  "code": "import time\ntime.sleep(35)\nprint('done')",
+  "input": "{}"
+}
+
+###
+
+### Test 8: Run with Specific Version
+POST http://localhost:8080/run/test/javascript?version=1702467890
+Content-Type: application/json
+
+{
+  "name": "VersionTest"
+}
+
+###
+
+### Test 9: Invalid Language
+POST http://localhost:8080/run-now
+Content-Type: application/json
+
+{
+  "language": "ruby",
+  "code": "puts 'Hello'",
+  "input": "{}"
+}
+
+###
+
+### Test 10: Empty Code
+POST http://localhost:8080/run-now
+Content-Type: application/json
+
+{
+  "language": "python",
+  "code": "",
+  "input": "{}"
+}
+
+###
+
+### Test 11: Complex Data Processing
+POST http://localhost:8080/run-now
+Content-Type: application/json
+
+{
+  "language": "javascript",
+  "code": "const transactions = event.transactions; const total = transactions.reduce((sum, t) => sum + t.amount, 0); const avg = total / transactions.length; console.log(JSON.stringify({total, average: avg.toFixed(2), count: transactions.length}));",
+  "input": "{\"transactions\": [{\"id\": 1, \"amount\": 100}, {\"id\": 2, \"amount\": 250}, {\"id\": 3, \"amount\": 75}]}"
+}
+
+###
+
+### Test 12: Run Now - Plain Text Output
+POST http://localhost:8080/run-now
+Content-Type: application/json
+
+{
+  "language": "python",
+  "code": "for i in range(5):\n    print(f'Line {i+1}')",
+  "input": "{}"
+}
+
+###

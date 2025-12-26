@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -12,12 +11,14 @@ import (
 	"github.com/pardnchiu/go-faas/internal/database"
 )
 
+type UploadRequest struct {
+	Path     string `json:"path" binding:"required"`
+	Code     string `json:"code" binding:"required"`
+	Language string `json:"language" binding:"required"`
+}
+
 func Upload(c *gin.Context) {
-	var req struct {
-		Path     string `json:"path" binding:"required"`
-		Code     string `json:"code" binding:"required"`
-		Language string `json:"language" binding:"required"`
-	}
+	var req UploadRequest
 
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.String(http.StatusBadRequest, "Invalid request payload")
@@ -29,15 +30,20 @@ func Upload(c *gin.Context) {
 		return
 	}
 
-	if _, ok := runtimeMap[req.Language]; !ok {
-		c.String(http.StatusBadRequest, fmt.Sprintf("Unsupported language: %s", req.Language))
+	if req.Language != "python" && req.Language != "javascript" && req.Language != "typescript" {
+		c.String(http.StatusBadRequest, "Invalid path")
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	timestamp, err := database.DB.Add(ctx, req.Path, req.Code, req.Language)
+	version, err := database.DB.Add(ctx, database.Script{
+		Path:     req.Path,
+		Code:     req.Code,
+		Language: req.Language,
+	})
+
 	if err != nil {
 		slog.Error("failed to save function",
 			slog.String("error", err.Error()),
@@ -49,6 +55,6 @@ func Upload(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"path":     req.Path,
 		"language": req.Language,
-		"version":  timestamp,
+		"version":  version,
 	})
 }

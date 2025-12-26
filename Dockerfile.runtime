@@ -1,7 +1,11 @@
 FROM node:24.10.0-alpine
 
-RUN apk add --no-cache python3 py3-pip && \
-  npm install -g tsx
+RUN apk add --no-cache \
+  python3 \
+  py3-pip \
+  && ln -sf python3 /usr/bin/python
+
+RUN npm install -g tsx
 
 WORKDIR /app
 
@@ -9,5 +13,8 @@ WORKDIR /app
 COPY internal/resource/wrapper.js /app/wrapper.js
 COPY internal/resource/wrapper.py /app/wrapper.py
 COPY internal/resource/wrapper.ts /app/wrapper.ts
+
+# Create temp directory
+RUN mkdir -p /app/temp && chmod 777 /app/temp
 
 CMD ["sleep", "infinity"]

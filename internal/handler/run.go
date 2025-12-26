@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/pardnchiu/go-faas/internal/container"
 	"github.com/pardnchiu/go-faas/internal/database"
-	"github.com/pardnchiu/go-faas/internal/docker"
 )
 
 var (
@@ -94,35 +94,48 @@ func Run(c *gin.Context) {
 }
 
 func runScript(code, lang, input string) (string, error) {
-	ct := docker.Get()
-	defer docker.Release(ct)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ct, err := container.Get(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to acquire container: %w", err)
+	}
+	defer container.Release(ct)
 
 	runtime := runtimeMap[lang]
 	ext := extMap[lang]
 
-	// Write code to local temp file (mounted in container)
 	tempFile := fmt.Sprintf("temp_%d%s", time.Now().UnixNano(), ext)
 	localPath := filepath.Join("temp", tempFile)
 
 	if err := os.WriteFile(localPath, []byte(code), 0644); err != nil {
 		return "", fmt.Errorf("failed to write code: %w", err)
 	}
-	defer os.Remove(localPath)
+	defer func() {
+		if err := os.Remove(localPath); err != nil {
+			slog.Warn("failed to cleanup temp file",
+				slog.String("file", localPath),
+				slog.String("error", err.Error()),
+			)
+		}
+	}()
+
 	wrapPath := fmt.Sprintf("/app/wrapper%s", ext)
 	ctPath := filepath.Join("/app/temp", tempFile)
 
 	// * add 30s timeout context
-	ctx, cancel := context.WithTimeout(context.Background(), scriptTimeout)
+	ctx, cancel = context.WithTimeout(context.Background(), scriptTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "docker", "exec", "-i", ct, runtime, wrapPath, ctPath)
+	cmd := exec.CommandContext(ctx, "podman", "exec", "-i", ct, runtime, wrapPath, ctPath)
 	cmd.Stdin = strings.NewReader(input)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// * timeout
 		if ctx.Err() == context.DeadlineExceeded {
-			return "", fmt.Errorf("execution timeout")
+			return "", fmt.Errorf("execution timeout (max %v)", runNowTimeout)
 		}
 		return "", fmt.Errorf("%s: %s", err, string(output))
 	}
