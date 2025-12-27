@@ -31,7 +31,6 @@
   - [JavaScript](#javascript)
   - [TypeScript](#typescript)
   - [Python](#python)
-- [Configuration](#configuration)
 - [License](#license)
 - [Author](#author)
 - [Star](#star)
@@ -235,11 +234,10 @@ print(json.dumps(result))
 ## Configuration
 
 Timeout
-- Script execution: 30 seconds
+- Script execution: 30 seconds (default)
 
-Request limits
-- `/run/*`: max 10 MB
-- `/run-now`: max 5 MB
+Code limits
+- max `256KB` (default)
 
 ## License
 

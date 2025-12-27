@@ -19,11 +19,18 @@ import (
 	"github.com/pardnchiu/go-faas/internal/database"
 )
 
+type RunNowBody struct {
+	Code     string `json:"code" binding:"required"`
+	Language string `json:"language" binding:"required"`
+	Input    string `json:"input"`
+}
+
 var (
-	redisTimeout        = 5 * time.Second
-	scriptTimeout       = 30 * time.Second
-	scriptMax     int64 = 10 << 20
-	extMap              = map[string]string{
+	redisTimeout           = 5 * time.Second
+	runScriptTimeout       = 25 * time.Second
+	requestTimeout         = 30 * time.Second
+	codeMaxSize      int64 = 256 << 10 // 256 KB
+	extMap                 = map[string]string{
 		"python":     ".py",
 		"javascript": ".js",
 		"typescript": ".ts",
@@ -50,56 +57,143 @@ func Run(c *gin.Context) {
 	}
 
 	// * directly pass request body to script
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, scriptMax)
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, codeMaxSize)
 	reqBody, err := io.ReadAll(c.Request.Body)
 	if err != nil {
-		c.String(http.StatusBadRequest, "Failed to read request body")
+		c.String(http.StatusBadRequest,
+			fmt.Sprintf("bad request: %s", err.Error()),
+		)
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), redisTimeout)
 	defer cancel()
 
-	scriptData, err := database.DB.Get(ctx, targetPath, version)
+	script, err := database.DB.Get(ctx, targetPath, version)
 	if err != nil {
-		slog.Warn("function not found in redis",
-			slog.String("path", targetPath),
-			slog.String("error", err.Error()),
+		c.String(http.StatusNotFound,
+			fmt.Sprintf("bad request: %s", err.Error()),
 		)
-		c.String(http.StatusNotFound, "Function not found")
 		return
 	}
 
-	slog.Info("run function",
-		slog.String("path", targetPath),
-		slog.String("language", scriptData.Language),
-		slog.Int64("version", scriptData.Timestamp),
-	)
-
-	// * change to use directly code
-	output, err := runScript(scriptData.Code, scriptData.Language, string(reqBody))
+	output, err := runScript(script.Code, script.Language, string(reqBody))
 	if err != nil {
-		c.String(http.StatusInternalServerError, fmt.Sprintf("Failed to run script: %s", err.Error()))
+		c.String(http.StatusInternalServerError,
+			fmt.Sprintf("failed to run: %s", err.Error()),
+		)
 		return
 	}
 
 	var data interface{}
 	if err := json.Unmarshal([]byte(output), &data); err == nil {
-		// * output can parse, return JSON type
-		c.JSON(http.StatusOK, data)
+		switch v := data.(type) {
+		case string:
+			c.JSON(http.StatusOK, gin.H{
+				"output": v,
+				"type":   "string",
+			})
+		case float64, int, int64, json.Number:
+			c.JSON(http.StatusOK, gin.H{
+				"output": v,
+				"type":   "number",
+			})
+		default:
+			c.JSON(http.StatusOK, gin.H{
+				"output": data,
+				"type":   "json",
+			})
+		}
 		return
 	}
 
-	c.String(http.StatusOK, output)
+	c.JSON(http.StatusOK, gin.H{
+		"output": output,
+		"type":   "text",
+	})
+}
+
+func RunNow(c *gin.Context) {
+	var body RunNowBody
+
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, codeMaxSize)
+
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.String(http.StatusBadRequest,
+			fmt.Sprintf("bad request: %s", err.Error()),
+		)
+		return
+	}
+
+	if _, ok := runtimeMap[body.Language]; !ok {
+		c.String(http.StatusBadRequest,
+			"bad request: unsupported language",
+		)
+		return
+	}
+
+	if strings.TrimSpace(body.Code) == "" {
+		c.String(http.StatusBadRequest,
+			"bad request: code is required",
+		)
+		return
+	}
+
+	slog.Info("run-now request",
+		slog.String("language", body.Language),
+		slog.Int("code_size", len(body.Code)),
+		slog.Int("input_size", len(body.Input)),
+	)
+	fmt.Printf("Code:\n")
+	fmt.Printf("%s\n\n", body.Code)
+	if strings.TrimSpace(body.Input) != "" {
+		fmt.Printf("Input:\n")
+		fmt.Printf("%s\n", body.Input)
+	}
+
+	output, err := runScript(body.Code, body.Language, body.Input)
+	if err != nil {
+		c.String(http.StatusInternalServerError,
+			fmt.Sprintf("failed to run: %s", err.Error()),
+		)
+		return
+	}
+
+	var data interface{}
+	if err := json.Unmarshal([]byte(output), &data); err == nil {
+		switch v := data.(type) {
+		case string:
+			c.JSON(http.StatusOK, gin.H{
+				"output": v,
+				"type":   "string",
+			})
+		case float64, int, int64, json.Number:
+			c.JSON(http.StatusOK, gin.H{
+				"output": v,
+				"type":   "number",
+			})
+		default:
+			c.JSON(http.StatusOK, gin.H{
+				"output": data,
+				"type":   "json",
+			})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"output": output,
+		"type":   "text",
+	})
 }
 
 func runScript(code, lang, input string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), runScriptTimeout)
 	defer cancel()
 
 	ct, err := container.Get(ctx)
 	if err != nil {
-		return "", fmt.Errorf("failed to acquire container: %w", err)
+		return "", fmt.Errorf("failed to get container: %w", err)
 	}
 	defer container.Release(ct)
 
@@ -124,25 +218,41 @@ func runScript(code, lang, input string) (string, error) {
 	wrapPath := fmt.Sprintf("/app/wrapper%s", ext)
 	ctPath := filepath.Join("/app/temp", tempFile)
 
-	// * add 30s timeout context
-	ctx, cancel = context.WithTimeout(context.Background(), scriptTimeout)
+	// * add (30 - 5)s timeout context
+	ctx, cancel = context.WithTimeout(context.Background(), requestTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "podman", "exec", "-i", ct, runtime, wrapPath, ctPath)
+	cmd := exec.CommandContext(ctx, "podman",
+		"exec", "-i", ct, runtime, wrapPath, ctPath,
+	)
 	cmd.Stdin = strings.NewReader(input)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// * timeout
 		if ctx.Err() == context.DeadlineExceeded {
-			return "", fmt.Errorf("execution timeout (max %v)", runNowTimeout)
+			return "", fmt.Errorf("execution timeout (max %v)", requestTimeout)
 		}
 		return "", fmt.Errorf("%s: %s", err, string(output))
 	}
 
-	result := strings.TrimSpace(string(output))
-	result = cleanOutput(result)
+	raw := strings.TrimSpace(string(output))
+	// try to find last valid JSON line (wrapper prints final return as JSON)
+	if raw != "" {
+		lines := strings.Split(raw, "\n")
+		for i := len(lines) - 1; i >= 0; i-- {
+			l := strings.TrimSpace(lines[i])
+			if l == "" {
+				continue
+			}
+			if json.Valid([]byte(l)) {
+				return l, nil
+			}
+		}
+	}
 
+	// fallback: clean and return full output
+	result := cleanOutput(raw)
 	return result, nil
 }
 

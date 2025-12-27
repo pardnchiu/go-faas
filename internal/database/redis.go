@@ -32,10 +32,15 @@ func Init() error {
 	port := utils.GetWithDefaultInt("REDIS_PORT", 6379)
 	password := utils.GetWithDefault("REDIS_PASSWORD", "")
 	dbNum := utils.GetWithDefaultInt("REDIS_DB", 0)
+	timeout := time.Duration(utils.GetWithDefaultInt("REDIS_TIMEOUT_SECONDS", 5)) * time.Second
 	rdb := redis.NewClient(&redis.Options{
-		Addr:     fmt.Sprintf("%s:%d", host, port),
-		Password: password,
-		DB:       dbNum,
+		Addr:         fmt.Sprintf("%s:%d", host, port),
+		Password:     password,
+		DB:           dbNum,
+		DialTimeout:  timeout,
+		ReadTimeout:  timeout,
+		WriteTimeout: timeout,
+		PoolTimeout:  timeout,
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

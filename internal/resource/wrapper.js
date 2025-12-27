@@ -28,8 +28,25 @@ process.stdin.on('end', () => {
     global.event = event;
     global.input = input;
 
-    // Execute user script
-    require(scriptPath);
+    // Execute user script wrapped so top-level `return` works
+    try {
+      const vm = require('vm');
+      const code = fs.readFileSync(scriptPath, 'utf8');
+      const wrapped = `(async function(){\n${code}\n})()`;
+      const scriptObj = new vm.Script(wrapped, { filename: scriptPath });
+      const context = vm.createContext(global);
+      Promise.resolve(scriptObj.runInContext(context)).then((res) => {
+        if (typeof res !== 'undefined') {
+          console.log(JSON.stringify(res));
+        }
+      }).catch((err) => {
+        console.error('Error:', err && err.message ? err.message : String(err));
+        process.exit(1);
+      });
+    } catch (e) {
+      console.error('Error:', e && e.message ? e.message : String(e));
+      process.exit(1);
+    }
   } catch (error) {
     console.error('Error:', error.message);
     process.exit(1);
