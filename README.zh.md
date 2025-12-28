@@ -1,5 +1,8 @@
 ![cover](./cover.png)
 
+> [!TIP]
+> 專案下一步方向：將移除 Podman 依賴，改以 Native Sandbox（如 seccomp、chroot、namespace、資源限制等）方式隔離腳本執行，簡化部署的同時提升效能。
+
 # Go FaaS
 
 [![pkg](https://pkg.go.dev/badge/github.com/pardnchiu/go-faas.svg)](https://pkg.go.dev/github.com/pardnchiu/go-faas)
@@ -7,7 +10,7 @@
 [![version](https://img.shields.io/github/v/tag/pardnchiu/go-faas?label=release)](https://github.com/pardnchiu/go-faas/releases)
 [![license](https://img.shields.io/github/license/pardnchiu/go-faas)](LICENSE)
 
-> 輕量的 Golang FaaS 平台，提供 JavaScript、TypeScript 與 Python 腳本的隔離執行環境，支援即時執行與版本管理，使用 Podman/Docker 容器保護主機安全
+> 輕量的 Golang FaaS 平台，提供 JavaScript、TypeScript 與 Python 腳本的隔離執行環境，支援即時執行與版本管理，使用 Podman 容器保護主機安全
 
 - [三大核心特色](#三大核心特色)
     - [多語言支援](#多語言支援)
@@ -112,14 +115,25 @@ go run cmd/api/main.go
 ### 容器配置
 
 ```env
+# 預設 runtime.NumCPU()
 MAX_CONTAINERS=4
-GPU_ENABLED=false     # 若有 Nvidia GPU 可以配置
-HTTP_PORT=8080
+# 預設 false, 若有 Nvidia GPU 可以設定 true
+GPU_ENABLED=
+# 預設 8080
+HTTP_PORT=
+# 預設 256 << 10 (256KB)
+CODE_MAX_SIZE=
+# 預設 30 (s)
+TIMEOUT_SCRIPT=
 
-REDIS_HOST=localhost
-REDIS_PORT=6379
+# 預設 localhost
+REDIS_HOST=
+# 預設 6379
+REDIS_PORT=
+# 預設空
 REDIS_PASSWORD=
-REDIS_DB=0
+# 預設 0
+REDIS_DB=
 ```
 
 
@@ -198,7 +212,7 @@ REDIS_DB=0
 
 - POST: `/run-now`
 - 支援語言: `javascript`、`typescript`、`python`
-- 用途：用於需要逐步回傳結果（如 AI 生成、長時間運算等），回應為 SSE (Server-Sent Events) 格式。
+- 用途：用於需要追蹤日誌輸出，回應為 SSE 格式。
 - 啟用串流需於請求 body 加入 `"stream": true`。
 - 請求範例
     ```json
@@ -299,9 +313,10 @@ return result
 <h4 style="padding-top: 0">邱敬幃 Pardn Chiu</h4>
 
 <a href="mailto:dev@pardn.io" target="_blank">
-  <img src="https://pardn.io/image/email.svg" width="48" height="48">
-</a> <a href="https://linkedin.com/in/pardnchiu" target="_blank">
-  <img src="https://pardn.io/image/linkedin.svg" width="48" height="48">
+<img src="https://pardn.io/image/email.svg" width="48" height="48">
+</a>
+<a href="https://linkedin.com/in/pardnchiu" target="_blank">
+<img src="https://pardn.io/image/linkedin.svg" width="48" height="48">
 </a>
 
 ## 星

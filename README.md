@@ -1,7 +1,10 @@
-![cover](./cover.png)
-
 > [!NOTE]
 > This README was translated by ChatGPT 4.1, get the original version from [here](./README.zh.md).
+
+![cover](./cover.png)
+
+> [!TIP]
+> Next step for the project: remove Podman dependency and switch to native sandboxing (such as seccomp, chroot, namespace, resource limits, etc.) for script isolation, simplifying deployment and improving performance.
 
 # Go FaaS
 
@@ -10,7 +13,7 @@
 [![version](https://img.shields.io/github/v/tag/pardnchiu/go-faas?label=release)](https://github.com/pardnchiu/go-faas/releases)
 [![license](https://img.shields.io/github/license/pardnchiu/go-faas)](LICENSE)
 
-> Lightweight Golang FaaS platform providing isolated execution environments for JavaScript, TypeScript, and Python scripts. Supports real-time execution and version management, using Podman/Docker containers to protect host security.
+> Lightweight Golang FaaS platform providing isolated execution environments for JavaScript, TypeScript, and Python scripts. Supports real-time execution and version management, using Podman containers to protect host security.
 
 - [Core Features](#core-features)
   - [Multi-language Support](#multi-language-support)
@@ -114,14 +117,25 @@ go run cmd/api/main.go
 ### Container Configuration
 
 ```env
+# default runtime.NumCPU()
 MAX_CONTAINERS=4
-GPU_ENABLED=false     # Set to true if Nvidia GPU is available
-HTTP_PORT=8080
+# default false, set to true if Nvidia GPU is available
+GPU_ENABLED=
+# default 8080
+HTTP_PORT=
+# default 256 << 10 (256KB)
+CODE_MAX_SIZE=
+# default 30 (s)
+TIMEOUT_SCRIPT=
 
-REDIS_HOST=localhost
-REDIS_PORT=6379
+# default localhost
+REDIS_HOST=
+# default 6379
+REDIS_PORT=
+# default no password
 REDIS_PASSWORD=
-REDIS_DB=0
+# default 0
+REDIS_DB=
 ```
 
 ## API
@@ -199,7 +213,7 @@ REDIS_DB=0
 
 - POST: `/run-now`
 - Supported languages: `javascript`, `typescript`, `python`
-- Purpose: For scenarios needing progressive result feedback (e.g., AI generation, long computation), response is SSE (Server-Sent Events) format.
+- Purpose: Used for tracking log output, with responses in SSE format.
 - To enable streaming, set `"stream": true` in the request body.
 - Request example
   ```json
@@ -300,9 +314,10 @@ This project is licensed under [MIT](LICENSE).
 <h4 style="padding-top: 0">邱敬幃 Pardn Chiu</h4>
 
 <a href="mailto:dev@pardn.io" target="_blank">
-  <img src="https://pardn.io/image/email.svg" width="48" height="48">
-</a> <a href="https://linkedin.com/in/pardnchiu" target="_blank">
-  <img src="https://pardn.io/image/linkedin.svg" width="48" height="48">
+<img src="https://pardn.io/image/email.svg" width="48" height="48">
+</a>
+<a href="https://linkedin.com/in/pardnchiu" target="_blank">
+<img src="https://pardn.io/image/linkedin.svg" width="48" height="48">
 </a>
 
 ## Star
