@@ -24,6 +24,7 @@
     - [上傳腳本](#上傳腳本)
     - [執行已上傳的腳本](#執行已上傳的腳本)
     - [直接執行腳本](#直接執行腳本)
+    - [串流執行 (stream)](#串流執行-stream)
 - [腳本類型](#腳本類型)
     - [JavaScript](#javascript)
     - [TypeScript](#typescript)
@@ -121,6 +122,7 @@ REDIS_PASSWORD=
 REDIS_DB=0
 ```
 
+
 ## API
 
 ### 上傳腳本
@@ -135,7 +137,7 @@ REDIS_DB=0
     {
       "path": "test/calculator",
       "language": "javascript",
-      "code": "console.log(JSON.stringify({ sum: event.a + event.b }));"
+      "code": "return JSON.stringify({ sum: event.a + event.b });"
     }
     ```
 - 回應範例
@@ -155,36 +157,85 @@ REDIS_DB=0
     ```json
     // 以 `/run/test/calculator` 為範例
     {
-      "a": 10,
-      "b": 5
+      "input": {
+        "a": 10,
+        "b": 5
+      }
     }
     ```
 - 回應範例
     ```json
     {
-      "sum": 15
+      "data": {
+        "sum": 15
+      },
+      "type": "json"
     }
     ```
 
 ### 直接執行腳本
 - POST: `/run-now`
 - 請求範例
+
     ```json
     {
       "language": "python",
-      "code": "import json\nresult = {'sum': event['a'] + event['b']}\nprint(json.dumps(result))",
+      "code": "import json\nresult = {'sum': event['a'] + event['b']}\nreturn json.dumps(result)",
       "input": "{\"a\": 10, \"b\": 5}"
     }
     ```
-- 回應範例
+    回應範例
     ```json
     {
-      "output": {
+      "data": {
         "sum": 15
       },
       "type": "json"
     }
     ```
+
+### 串流執行 (stream)
+
+- POST: `/run-now`
+- 支援語言: `javascript`、`typescript`、`python`
+- 用途：用於需要逐步回傳結果（如 AI 生成、長時間運算等），回應為 SSE (Server-Sent Events) 格式。
+- 啟用串流需於請求 body 加入 `"stream": true`。
+- 請求範例
+    ```json
+    {
+      "language": "python",
+      "code": "import json\nfor i in range(3):\n  print(json.dumps({'progress': i*50}))\nresult = {'sum': event['a'] + event['b']}\nprint(json.dumps({'sum': result['sum'], 'done': True}))",
+      "input": "{\"a\": 10, \"b\": 5}",
+      "stream": true
+    }
+    ```
+- 回應範例 (SSE)
+    ```text
+    data: {"event":"log","data":"Progress: 0%","type":"text"}
+
+    data: {"event":"log","data":"Progress: 10%","type":"text"}
+
+    data: {"event":"log","data":"Progress: 20%","type":"text"}
+
+    data: {"event":"log","data":"Progress: 30%","type":"text"}
+
+    data: {"event":"log","data":"Progress: 40%","type":"text"}
+
+    data: {"event":"log","data":"Progress: 50%","type":"text"}
+
+    data: {"event":"log","data":"Progress: 60%","type":"text"}
+
+    data: {"event":"log","data":"Progress: 70%","type":"text"}
+
+    data: {"event":"log","data":"Progress: 80%","type":"text"}
+
+    data: {"event":"log","data":"Progress: 90%","type":"text"}
+
+    data: {"event":"result","data":"Complete","type":"string"}
+    ```
+
+  > [!NOTE]
+  > stream 介面會依腳本執行進度多次推送資料，最後一筆通常帶有 `event: result` 表示結束。
 
 ## 腳本類型
 
@@ -199,7 +250,7 @@ const result = {
   sum: event.a + event.b,
   product: event.a * event.b
 };
-console.log(JSON.stringify(result));
+return result
 ```
 
 ### TypeScript
@@ -214,7 +265,7 @@ const result = {
   sum: event.a + event.b,
   product: event.a * event.b
 };
-console.log(JSON.stringify(result));
+return result;
 ```
 
 ### Python
@@ -226,7 +277,7 @@ result = {
     'sum': event['a'] + event['b'],
     'product': event['a'] * event['b']
 }
-print(json.dumps(result))
+return result
 ```
 
 ## 配置說明

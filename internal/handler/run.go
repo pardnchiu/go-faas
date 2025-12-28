@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -17,20 +16,27 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pardnchiu/go-faas/internal/container"
 	"github.com/pardnchiu/go-faas/internal/database"
+	"github.com/pardnchiu/go-faas/internal/utils"
 )
+
+type RunBody struct {
+	Input  string `json:"input"`
+	Stream bool   `json:"stream"`
+}
 
 type RunNowBody struct {
 	Code     string `json:"code" binding:"required"`
 	Language string `json:"language" binding:"required"`
 	Input    string `json:"input"`
+	Stream   bool   `json:"stream"`
 }
 
 var (
-	redisTimeout           = 5 * time.Second
-	runScriptTimeout       = 25 * time.Second
-	requestTimeout         = 30 * time.Second
-	codeMaxSize      int64 = 256 << 10 // 256 KB
-	extMap                 = map[string]string{
+	timeoutRedis   = 5 * time.Second
+	timeoutScript  time.Duration
+	timeoutRequest time.Duration
+	codeMaxSize    int64
+	extMap         = map[string]string{
 		"python":     ".py",
 		"javascript": ".js",
 		"typescript": ".ts",
@@ -56,17 +62,21 @@ func Run(c *gin.Context) {
 		}
 	}
 
-	// * directly pass request body to script
+	if codeMaxSize == 0 {
+		codeMaxSize = int64(utils.GetWithDefaultInt("CODE_MAX_SIZE", 256<<10))
+	}
+
+	var body RunBody
+
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, codeMaxSize)
-	reqBody, err := io.ReadAll(c.Request.Body)
-	if err != nil {
+	if err := c.ShouldBindJSON(&body); err != nil {
 		c.String(http.StatusBadRequest,
 			fmt.Sprintf("bad request: %s", err.Error()),
 		)
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), redisTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutRedis)
 	defer cancel()
 
 	script, err := database.DB.Get(ctx, targetPath, version)
@@ -77,7 +87,33 @@ func Run(c *gin.Context) {
 		return
 	}
 
-	output, err := runScript(script.Code, script.Language, string(reqBody))
+	if body.Stream {
+		c.Writer.Header().Set("Content-Type", "text/event-stream")
+		c.Writer.Header().Set("Cache-Control", "no-cache")
+		c.Writer.Header().Set("Connection", "keep-alive")
+
+		flusher, ok := c.Writer.(http.Flusher)
+		if !ok {
+			c.String(http.StatusInternalServerError,
+				"streaming unsupported",
+			)
+			return
+		}
+
+		ctx := c.Request.Context()
+
+		flusher.Flush()
+
+		res, err := runScriptWithSSE(script.Code, script.Language, body.Input, c.Writer, flusher, ctx)
+		if err != nil {
+			sendDone(c.Writer, flusher, "error", strings.ReplaceAll(err.Error(), "\n", " "))
+			return
+		}
+		sendDone(c.Writer, flusher, "result", strings.ReplaceAll(res, "\n", " "))
+		return
+	}
+
+	output, err := runScript(script.Code, script.Language, body.Input)
 	if err != nil {
 		c.String(http.StatusInternalServerError,
 			fmt.Sprintf("failed to run: %s", err.Error()),
@@ -85,39 +121,17 @@ func Run(c *gin.Context) {
 		return
 	}
 
-	var data interface{}
-	if err := json.Unmarshal([]byte(output), &data); err == nil {
-		switch v := data.(type) {
-		case string:
-			c.JSON(http.StatusOK, gin.H{
-				"output": v,
-				"type":   "string",
-			})
-		case float64, int, int64, json.Number:
-			c.JSON(http.StatusOK, gin.H{
-				"output": v,
-				"type":   "number",
-			})
-		default:
-			c.JSON(http.StatusOK, gin.H{
-				"output": data,
-				"type":   "json",
-			})
-		}
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"output": output,
-		"type":   "text",
-	})
+	sendResult(c, output)
 }
 
 func RunNow(c *gin.Context) {
+	if codeMaxSize == 0 {
+		codeMaxSize = int64(utils.GetWithDefaultInt("CODE_MAX_SIZE", 256<<10))
+	}
+
 	var body RunNowBody
 
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, codeMaxSize)
-
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.String(http.StatusBadRequest,
 			fmt.Sprintf("bad request: %s", err.Error()),
@@ -151,6 +165,32 @@ func RunNow(c *gin.Context) {
 		fmt.Printf("%s\n", body.Input)
 	}
 
+	if body.Stream {
+		c.Writer.Header().Set("Content-Type", "text/event-stream")
+		c.Writer.Header().Set("Cache-Control", "no-cache")
+		c.Writer.Header().Set("Connection", "keep-alive")
+
+		flusher, ok := c.Writer.(http.Flusher)
+		if !ok {
+			c.String(http.StatusInternalServerError,
+				"streaming unsupported",
+			)
+			return
+		}
+
+		ctx := c.Request.Context()
+
+		flusher.Flush()
+
+		res, err := runScriptWithSSE(body.Code, body.Language, body.Input, c.Writer, flusher, ctx)
+		if err != nil {
+			sendDone(c.Writer, flusher, "error", strings.ReplaceAll(err.Error(), "\n", " "))
+			return
+		}
+		sendDone(c.Writer, flusher, "result", strings.ReplaceAll(res, "\n", " "))
+		return
+	}
+
 	output, err := runScript(body.Code, body.Language, body.Input)
 	if err != nil {
 		c.String(http.StatusInternalServerError,
@@ -159,43 +199,22 @@ func RunNow(c *gin.Context) {
 		return
 	}
 
-	var data interface{}
-	if err := json.Unmarshal([]byte(output), &data); err == nil {
-		switch v := data.(type) {
-		case string:
-			c.JSON(http.StatusOK, gin.H{
-				"output": v,
-				"type":   "string",
-			})
-		case float64, int, int64, json.Number:
-			c.JSON(http.StatusOK, gin.H{
-				"output": v,
-				"type":   "number",
-			})
-		default:
-			c.JSON(http.StatusOK, gin.H{
-				"output": data,
-				"type":   "json",
-			})
-		}
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"output": output,
-		"type":   "text",
-	})
+	sendResult(c, output)
 }
 
-func runScript(code, lang, input string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), runScriptTimeout)
+func prepareScript(code, lang string) (string, string, string, string, string, error) {
+	if timeoutScript == 0 {
+		timeoutScript = time.Duration(utils.GetWithDefaultInt("TIMEOUT_SCRIPT", 30)) * time.Second
+		timeoutRequest = timeoutScript + timeoutRedis
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutScript)
 	defer cancel()
 
 	ct, err := container.Get(ctx)
 	if err != nil {
-		return "", fmt.Errorf("failed to get container: %w", err)
+		return "", "", "", "", "", fmt.Errorf("failed to get container: %w", err)
 	}
-	defer container.Release(ct)
 
 	runtime := runtimeMap[lang]
 	ext := extMap[lang]
@@ -204,9 +223,19 @@ func runScript(code, lang, input string) (string, error) {
 	localPath := filepath.Join("temp", tempFile)
 
 	if err := os.WriteFile(localPath, []byte(code), 0644); err != nil {
-		return "", fmt.Errorf("failed to write code: %w", err)
+		return "", "", "", "", "", fmt.Errorf("failed to write code: %w", err)
 	}
+
+	wrapPath := fmt.Sprintf("/app/wrapper%s", ext)
+	ctPath := filepath.Join("/app/temp", tempFile)
+
+	return ct, runtime, localPath, wrapPath, ctPath, nil
+}
+
+func runScript(code, lang, input string) (string, error) {
+	ct, runtime, localPath, wrapPath, ctPath, err := prepareScript(code, lang)
 	defer func() {
+		container.Release(ct)
 		if err := os.Remove(localPath); err != nil {
 			slog.Warn("failed to cleanup temp file",
 				slog.String("file", localPath),
@@ -214,12 +243,11 @@ func runScript(code, lang, input string) (string, error) {
 			)
 		}
 	}()
+	if err != nil {
+		return "", err
+	}
 
-	wrapPath := fmt.Sprintf("/app/wrapper%s", ext)
-	ctPath := filepath.Join("/app/temp", tempFile)
-
-	// * add (30 - 5)s timeout context
-	ctx, cancel = context.WithTimeout(context.Background(), requestTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutRequest)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "podman",
@@ -231,13 +259,12 @@ func runScript(code, lang, input string) (string, error) {
 	if err != nil {
 		// * timeout
 		if ctx.Err() == context.DeadlineExceeded {
-			return "", fmt.Errorf("execution timeout (max %v)", requestTimeout)
+			return "", fmt.Errorf("execution timeout (max %v)", timeoutRequest)
 		}
 		return "", fmt.Errorf("%s: %s", err, string(output))
 	}
 
 	raw := strings.TrimSpace(string(output))
-	// try to find last valid JSON line (wrapper prints final return as JSON)
 	if raw != "" {
 		lines := strings.Split(raw, "\n")
 		for i := len(lines) - 1; i >= 0; i-- {
@@ -251,7 +278,6 @@ func runScript(code, lang, input string) (string, error) {
 		}
 	}
 
-	// fallback: clean and return full output
 	result := cleanOutput(raw)
 	return result, nil
 }
@@ -277,4 +303,32 @@ func cleanOutput(output string) string {
 	}
 
 	return strings.Join(newList, "\n")
+}
+
+func sendResult(c *gin.Context, output string) {
+	var data interface{}
+	if err := json.Unmarshal([]byte(output), &data); err == nil {
+		switch v := data.(type) {
+		case string:
+			c.JSON(http.StatusOK, gin.H{
+				"data": data,
+				"type": "string",
+			})
+		case float64, int, int64, json.Number:
+			c.JSON(http.StatusOK, gin.H{
+				"data": v,
+				"type": "number",
+			})
+		default:
+			c.JSON(http.StatusOK, gin.H{
+				"data": data,
+				"type": "json",
+			})
+		}
+	} else {
+		c.JSON(http.StatusOK, gin.H{
+			"data": output,
+			"type": "text",
+		})
+	}
 }

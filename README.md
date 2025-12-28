@@ -27,6 +27,7 @@
   - [Upload Script](#upload-script)
   - [Run Uploaded Script](#run-uploaded-script)
   - [Run Script Directly](#run-script-directly)
+  - [Stream Execution (SSE)](#stream-execution-sse)
 - [Script Types](#script-types)
   - [JavaScript](#javascript)
   - [TypeScript](#typescript)
@@ -137,7 +138,7 @@ REDIS_DB=0
   {
     "path": "test/calculator",
     "language": "javascript",
-    "code": "console.log(JSON.stringify({ sum: event.a + event.b }));"
+    "code": "return JSON.stringify({ sum: event.a + event.b });"
   }
   ```
 - Response example
@@ -157,36 +158,85 @@ REDIS_DB=0
   ```json
   // Example for `/run/test/calculator`
   {
-    "a": 10,
-    "b": 5
+    "input": {
+      "a": 10,
+      "b": 5
+    }
   }
   ```
 - Response example
   ```json
   {
-    "sum": 15
+    "data": {
+      "sum": 15
+    },
+    "type": "json"
   }
   ```
 
 ### Run Script Directly
 - POST: `/run-now`
 - Request example
+
   ```json
   {
     "language": "python",
-    "code": "import json\nresult = {'sum': event['a'] + event['b']}\nprint(json.dumps(result))",
+    "code": "import json\nresult = {'sum': event['a'] + event['b']}\nreturn json.dumps(result)",
     "input": "{\"a\": 10, \"b\": 5}"
   }
   ```
-- Response example
+  Response example
   ```json
   {
-    "output": {
-    "sum": 15
+    "data": {
+      "sum": 15
     },
     "type": "json"
   }
   ```
+
+### Stream Execution (SSE)
+
+- POST: `/run-now`
+- Supported languages: `javascript`, `typescript`, `python`
+- Purpose: For scenarios needing progressive result feedback (e.g., AI generation, long computation), response is SSE (Server-Sent Events) format.
+- To enable streaming, set `"stream": true` in the request body.
+- Request example
+  ```json
+  {
+    "language": "python",
+    "code": "import json\nfor i in range(3):\n  print(json.dumps({'progress': i*50}))\nresult = {'sum': event['a'] + event['b']}\nprint(json.dumps({'sum': result['sum'], 'done': True}))",
+    "input": "{\"a\": 10, \"b\": 5}",
+    "stream": true
+  }
+  ```
+- Response example (SSE)
+  ```text
+  data: {"event":"log","data":"Progress: 0%","type":"text"}
+
+  data: {"event":"log","data":"Progress: 10%","type":"text"}
+
+  data: {"event":"log","data":"Progress: 20%","type":"text"}
+
+  data: {"event":"log","data":"Progress: 30%","type":"text"}
+
+  data: {"event":"log","data":"Progress: 40%","type":"text"}
+
+  data: {"event":"log","data":"Progress: 50%","type":"text"}
+
+  data: {"event":"log","data":"Progress: 60%","type":"text"}
+
+  data: {"event":"log","data":"Progress: 70%","type":"text"}
+
+  data: {"event":"log","data":"Progress: 80%","type":"text"}
+
+  data: {"event":"log","data":"Progress: 90%","type":"text"}
+
+  data: {"event":"result","data":"Complete","type":"string"}
+  ```
+
+> [!NOTE]
+> The stream API pushes data multiple times according to script progress, with the last message usually containing `event: result` to indicate completion.
 
 ## Script Types
 
@@ -201,7 +251,7 @@ const result = {
   sum: event.a + event.b,
   product: event.a * event.b
 };
-console.log(JSON.stringify(result));
+return result;
 ```
 
 ### TypeScript
@@ -216,7 +266,7 @@ const result = {
   sum: event.a + event.b,
   product: event.a * event.b
 };
-console.log(JSON.stringify(result));
+return result;
 ```
 
 ### Python
@@ -228,7 +278,7 @@ result = {
   'sum': event['a'] + event['b'],
   'product': event['a'] * event['b']
 }
-print(json.dumps(result))
+return result
 ```
 
 ## Configuration

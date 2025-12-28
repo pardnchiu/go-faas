@@ -9,6 +9,9 @@ RUN npm install -g tsx
 
 WORKDIR /app
 
+# Install esbuild locally for wrapper to use
+RUN npm init -y && npm install esbuild
+
 # * copy wrapper
 COPY internal/resource/wrapper.js /app/wrapper.js
 COPY internal/resource/wrapper.py /app/wrapper.py
