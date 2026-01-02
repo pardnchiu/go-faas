@@ -115,8 +115,12 @@ go run cmd/api/main.go
 ### 容器配置
 
 ```env
-# 預設 runtime.NumCPU()
+# 預設 runtime.NumCPU() * 2
 MAX_CONTAINERS=4
+# 預設 0.25
+MAX_CPUS_PER_CONTAINER=
+# 預設 128 << 20 (128MB)
+MAX_MEMORY_PER_CONTAINER=
 # 預設 false, 若有 Nvidia GPU 可以設定 true
 GPU_ENABLED=
 # 預設 8080

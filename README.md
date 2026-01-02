@@ -117,8 +117,12 @@ go run cmd/api/main.go
 ### Container Configuration
 
 ```env
-# default runtime.NumCPU()
+# default runtime.NumCPU() * 2
 MAX_CONTAINERS=4
+# default 0.25
+MAX_CPUS_PER_CONTAINER=
+# default 128 << 20 (128MB)
+MAX_MEMORY_PER_CONTAINER=
 # default false, set to true if Nvidia GPU is available
 GPU_ENABLED=
 # default 8080

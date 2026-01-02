@@ -44,7 +44,7 @@ func Init() ([]string, error) {
 	if cores < 1 {
 		cores = 1
 	}
-	maxContainers := utils.GetWithDefaultInt("MAX_CONTAINERS", cores)
+	maxContainers := utils.GetWithDefaultInt("MAX_CONTAINERS", cores*2)
 
 	ctList := make([]string, maxContainers)
 	for i := 0; i < maxContainers; i++ {

@@ -7,6 +7,8 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+
+	"github.com/pardnchiu/go-faas/internal/utils"
 )
 
 func start(list []string) error {
@@ -52,10 +54,27 @@ func start(list []string) error {
 			exec.Command("podman", "stop", ctName).Run()
 			exec.Command("podman", "rm", ctName).Run()
 
+			cpus := utils.GetWithDefaultFloat("MAX_CPUS_PER_CONTAINER", 0.25)
+
+			var cpusArg string
+			if cpus != 0 {
+				cpusArg = fmt.Sprintf("%.2f", cpus)
+			}
+
+			memory := utils.GetWithDefaultInt("MAX_MEMORY_PER_CONTAINER", 128<<20)
+
+			var memoryArg string
+			if memory != 0 {
+				memoryArg = fmt.Sprintf("%dm", memory/(1<<20))
+			}
+
 			runArgs := []string{
 				"run",
 				"-d",
 				"--name", ctName,
+				"--cpus", cpusArg,
+				"--memory", memoryArg,
+				"--memory-swap", memoryArg,
 			}
 
 			if gpuEnabled {

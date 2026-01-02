@@ -1,9 +1,12 @@
 package container
 
 import (
+	"fmt"
 	"log/slog"
 	"os/exec"
 	"time"
+
+	"github.com/pardnchiu/go-faas/internal/utils"
 )
 
 var (
@@ -19,11 +22,28 @@ func build(name string) {
 	exec.Command("podman", "stop", name).Run()
 	exec.Command("podman", "rm", name).Run()
 
+	cpus := utils.GetWithDefaultFloat("MAX_CPUS_PER_CONTAINER", 0.25)
+
+	var cpusArg string
+	if cpus != 0 {
+		cpusArg = fmt.Sprintf("%.2f", cpus)
+	}
+
+	memory := utils.GetWithDefaultInt("MAX_MEMORY_PER_CONTAINER", 128<<20)
+
+	var memoryArg string
+	if memory != 0 {
+		memoryArg = fmt.Sprintf("%dm", memory/(1<<20))
+	}
 	cmd := exec.Command("podman", "run",
 		"-d",
 		"--name", name,
+		"--cpus", cpusArg,
+		"--memory", memoryArg,
+		"--memory-swap", memoryArg,
 		"faas-runtime",
 	)
+
 	if output, err := cmd.CombinedOutput(); err != nil {
 		slog.Error("failed to build",
 			slog.String("container", name),
