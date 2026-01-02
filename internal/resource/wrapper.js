@@ -1,16 +1,8 @@
 #!/usr/bin/env node
 
-const fs = require('fs');
+const vm = require('vm');
 
-// Read script path from command line
-const scriptPath = process.argv[2];
-
-if (!scriptPath) {
-  console.error('Usage: node wrapper.js <script.js>');
-  process.exit(1);
-}
-
-// Read stdin (input data)
+// Read stdin (JSON payload with code and input)
 let inputData = '';
 process.stdin.setEncoding('utf8');
 
@@ -20,8 +12,13 @@ process.stdin.on('data', (chunk) => {
 
 process.stdin.on('end', () => {
   try {
+    // Parse payload JSON
+    const payload = inputData ? JSON.parse(inputData) : {};
+    const code = payload.code || '';
+    const inputStr = payload.input || '';
+
     // Parse input JSON
-    const event = inputData ? JSON.parse(inputData) : {};
+    const event = inputStr ? JSON.parse(inputStr) : {};
     const input = event;
 
     // Make event and input available globally
@@ -30,10 +27,8 @@ process.stdin.on('end', () => {
 
     // Execute user script wrapped so top-level `return` works
     try {
-      const vm = require('vm');
-      const code = fs.readFileSync(scriptPath, 'utf8');
       const wrapped = `(async function(){\n${code}\n})()`;
-      const scriptObj = new vm.Script(wrapped, { filename: scriptPath });
+      const scriptObj = new vm.Script(wrapped, { filename: 'user-code.js' });
       const context = vm.createContext(global);
       Promise.resolve(scriptObj.runInContext(context)).then((res) => {
         if (typeof res !== 'undefined') {

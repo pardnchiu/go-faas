@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sync"
 )
 
@@ -16,7 +15,6 @@ func start(list []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
-	folderPath := filepath.Join(wd, "temp")
 
 	gpuEnabled := os.Getenv("GPU_ENABLED") == "true"
 	dockerfile := "Dockerfile.runtime"
@@ -58,11 +56,6 @@ func start(list []string) error {
 				"run",
 				"-d",
 				"--name", ctName,
-				"-v", fmt.Sprintf("%s:/app/temp:Z", folderPath),
-				"--health-cmd", "test -d /app/temp || exit 1",
-				"--health-interval", "10s",
-				"--health-timeout", "5s",
-				"--health-retries", "3",
 			}
 
 			if gpuEnabled {

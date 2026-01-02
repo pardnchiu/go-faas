@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -202,7 +200,7 @@ func RunNow(c *gin.Context) {
 	sendResult(c, output)
 }
 
-func prepareScript(code, lang string) (string, string, string, string, string, error) {
+func prepareScript(code, lang string) (string, string, string, error) {
 	if timeoutScript == 0 {
 		timeoutScript = time.Duration(utils.GetWithDefaultInt("TIMEOUT_SCRIPT", 30)) * time.Second
 		timeoutRequest = timeoutScript + timeoutRedis
@@ -213,35 +211,20 @@ func prepareScript(code, lang string) (string, string, string, string, string, e
 
 	ct, err := container.Get(ctx)
 	if err != nil {
-		return "", "", "", "", "", fmt.Errorf("failed to get container: %w", err)
+		return "", "", "", fmt.Errorf("failed to get container: %w", err)
 	}
 
 	runtime := runtimeMap[lang]
 	ext := extMap[lang]
-
-	tempFile := fmt.Sprintf("temp_%d%s", time.Now().UnixNano(), ext)
-	localPath := filepath.Join("temp", tempFile)
-
-	if err := os.WriteFile(localPath, []byte(code), 0644); err != nil {
-		return "", "", "", "", "", fmt.Errorf("failed to write code: %w", err)
-	}
-
 	wrapPath := fmt.Sprintf("/app/wrapper%s", ext)
-	ctPath := filepath.Join("/app/temp", tempFile)
 
-	return ct, runtime, localPath, wrapPath, ctPath, nil
+	return ct, runtime, wrapPath, nil
 }
 
 func runScript(code, lang, input string) (string, error) {
-	ct, runtime, localPath, wrapPath, ctPath, err := prepareScript(code, lang)
+	ct, runtime, wrapPath, err := prepareScript(code, lang)
 	defer func() {
 		container.Release(ct)
-		if err := os.Remove(localPath); err != nil {
-			slog.Warn("failed to cleanup temp file",
-				slog.String("file", localPath),
-				slog.String("error", err.Error()),
-			)
-		}
 	}()
 	if err != nil {
 		return "", err
@@ -250,10 +233,20 @@ func runScript(code, lang, input string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeoutRequest)
 	defer cancel()
 
+	// * prepare stdin with JSON containing code and input
+	payload := map[string]string{
+		"code":  code,
+		"input": input,
+	}
+	payloadBody, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal payload: %w", err)
+	}
+
 	cmd := exec.CommandContext(ctx, "podman",
-		"exec", "-i", ct, runtime, wrapPath, ctPath,
+		"exec", "-i", ct, runtime, wrapPath,
 	)
-	cmd.Stdin = strings.NewReader(input)
+	cmd.Stdin = strings.NewReader(string(payloadBody))
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {

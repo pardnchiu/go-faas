@@ -1,11 +1,8 @@
 package container
 
 import (
-	"fmt"
 	"log/slog"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"time"
 )
 
@@ -18,17 +15,6 @@ func build(name string) {
 		slog.String("container", name),
 	)
 
-	wd, err := os.Getwd()
-	if err != nil {
-		slog.Error("failed to get working directory",
-			slog.String("container", name),
-			slog.String("error", err.Error()),
-		)
-		markIdle(name)
-		return
-	}
-	folderPath := filepath.Join(wd, "temp")
-
 	// * Clean up container if it exists
 	exec.Command("podman", "stop", name).Run()
 	exec.Command("podman", "rm", name).Run()
@@ -36,11 +22,6 @@ func build(name string) {
 	cmd := exec.Command("podman", "run",
 		"-d",
 		"--name", name,
-		"-v", fmt.Sprintf("%s:/app/temp:Z", folderPath), // * :Z for SELinux context
-		"--health-cmd", "test -d /app/temp || exit 1",
-		"--health-interval", "10s",
-		"--health-timeout", "5s",
-		"--health-retries", "3",
 		"faas-runtime",
 	)
 	if output, err := cmd.CombinedOutput(); err != nil {

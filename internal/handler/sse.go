@@ -6,9 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
-	"os"
 	"os/exec"
 	"strings"
 
@@ -63,15 +61,9 @@ func sendDone(w http.ResponseWriter, flusher http.Flusher, event, msg string) {
 }
 
 func runScriptWithSSE(code, lang, input string, w http.ResponseWriter, flusher http.Flusher, clientCtx context.Context) (string, error) {
-	ct, runtime, localPath, wrapPath, ctPath, err := prepareScript(code, lang)
+	ct, runtime, wrapPath, err := prepareScript(code, lang)
 	defer func() {
 		container.Release(ct)
-		if err := os.Remove(localPath); err != nil {
-			slog.Warn("failed to cleanup temp file",
-				slog.String("file", localPath),
-				slog.String("error", err.Error()),
-			)
-		}
 	}()
 	if err != nil {
 		return "", err
@@ -82,9 +74,9 @@ func runScriptWithSSE(code, lang, input string, w http.ResponseWriter, flusher h
 
 	var cmd *exec.Cmd
 	if lang == "python" {
-		cmd = exec.CommandContext(ctx, "podman", "exec", "-i", ct, runtime, "-u", wrapPath, ctPath)
+		cmd = exec.CommandContext(ctx, "podman", "exec", "-i", ct, runtime, "-u", wrapPath)
 	} else {
-		cmd = exec.CommandContext(ctx, "podman", "exec", "-i", ct, runtime, wrapPath, ctPath)
+		cmd = exec.CommandContext(ctx, "podman", "exec", "-i", ct, runtime, wrapPath)
 	}
 
 	stdin, err := cmd.StdinPipe()
@@ -106,8 +98,14 @@ func runScriptWithSSE(code, lang, input string, w http.ResponseWriter, flusher h
 		return "", fmt.Errorf("failed to start command: %w", err)
 	}
 
+	// * prepare stdin with JSON containing code and input
 	go func() {
-		io.WriteString(stdin, input)
+		payload := map[string]string{
+			"code":  code,
+			"input": input,
+		}
+		payloadBody, _ := json.Marshal(payload)
+		io.WriteString(stdin, string(payloadBody))
 		stdin.Close()
 	}()
 

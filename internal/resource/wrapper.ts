@@ -1,20 +1,11 @@
 #!/usr/bin/env tsx
 
-import * as fs from 'fs';
 import { createRequire } from 'module';
 import * as vm from 'vm';
 
 const require = createRequire(import.meta.url);
 
-// Read script path from command line
-const scriptPath = process.argv[2];
-
-if (!scriptPath) {
-  console.error('Usage: tsx wrapper.ts <script.ts>');
-  process.exit(1);
-}
-
-// Read stdin (input data)
+// Read stdin (JSON payload with code and input)
 let inputData = '';
 process.stdin.setEncoding('utf8');
 
@@ -24,8 +15,13 @@ process.stdin.on('data', (chunk) => {
 
 process.stdin.on('end', async () => {
   try {
+    // Parse payload JSON
+    const payload = inputData ? JSON.parse(inputData) : {};
+    const code = payload.code || '';
+    const inputStr = payload.input || '';
+
     // Parse input JSON
-    const event = inputData ? JSON.parse(inputData) : {};
+    const event = inputStr ? JSON.parse(inputStr) : {};
     const input = event;
 
     // Make event and input available globally
@@ -34,8 +30,6 @@ process.stdin.on('end', async () => {
 
     // Execute user script: compile TypeScript then run with vm
     try {
-      const code = fs.readFileSync(scriptPath, 'utf8');
-
       // Compile TypeScript to JavaScript with esbuild
       const { transformSync } = require('esbuild');
       const result = transformSync(code, {
@@ -48,7 +42,7 @@ process.stdin.on('end', async () => {
 
       // Wrap in async IIFE to support top-level return
       const wrapped = `(async function(){\n${jsCode}\n})()`;
-      const scriptObj = new vm.Script(wrapped, { filename: scriptPath });
+      const scriptObj = new vm.Script(wrapped, { filename: 'user-code.ts' });
       const context = vm.createContext(global as any);
       const res = await Promise.resolve(scriptObj.runInContext(context));
 

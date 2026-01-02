@@ -3,18 +3,17 @@
 import sys
 import json
 
-if len(sys.argv) < 2:
-    print('Usage: python wrapper.py <script.py>', file=sys.stderr)
-    sys.exit(1)
-
-script_path = sys.argv[1]
-
-# Read stdin (input data)
+# Read stdin (JSON payload with code and input)
 input_data = sys.stdin.read()
 
 try:
+    # Parse payload JSON
+    payload = json.loads(input_data) if input_data.strip() else {}
+    code = payload.get('code', '')
+    input_str = payload.get('input', '')
+    
     # Parse input JSON
-    event = json.loads(input_data) if input_data.strip() else {}
+    event = json.loads(input_str) if input_str.strip() else {}
     input_var = event
 
     # Make event and input available globally
@@ -22,9 +21,6 @@ try:
     globals()['input'] = input_var
 
     # Execute user script wrapped in a function so top-level `return` works
-    with open(script_path, 'r') as f:
-        code = f.read()
-
     func_code = 'def __user_main__():\n'
     for line in code.splitlines():
         func_code += '    ' + line + '\n'
