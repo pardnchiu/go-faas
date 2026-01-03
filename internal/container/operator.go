@@ -18,7 +18,7 @@ func start(list []string) error {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	gpuEnabled := os.Getenv("GPU_ENABLED") == "true"
+	gpuEnabled := utils.GetWithDefault("GPU_ENABLED", "false") == "true"
 	dockerfile := "Dockerfile.runtime"
 	if gpuEnabled {
 		dockerfile = "Dockerfile.runtime.gpu"
@@ -42,6 +42,7 @@ func start(list []string) error {
 
 	for _, e := range list {
 		wg.Add(1)
+
 		go func(ctName string) {
 			defer wg.Done()
 
@@ -54,39 +55,8 @@ func start(list []string) error {
 			exec.Command("podman", "stop", ctName).Run()
 			exec.Command("podman", "rm", ctName).Run()
 
-			cpus := utils.GetWithDefaultFloat("MAX_CPUS_PER_CONTAINER", 0.25)
-
-			var cpusArg string
-			if cpus != 0 {
-				cpusArg = fmt.Sprintf("%.2f", cpus)
-			}
-
-			memory := utils.GetWithDefaultInt("MAX_MEMORY_PER_CONTAINER", 128<<20)
-
-			var memoryArg string
-			if memory != 0 {
-				memoryArg = fmt.Sprintf("%dm", memory/(1<<20))
-			}
-
-			runArgs := []string{
-				"run",
-				"-d",
-				"--name", ctName,
-				"--cpus", cpusArg,
-				"--memory", memoryArg,
-				"--memory-swap", memoryArg,
-			}
-
-			if gpuEnabled {
-				runArgs = append(runArgs,
-					"--device", "nvidia.com/gpu=all",
-					"--security-opt", "label=disable",
-				)
-			}
-
-			runArgs = append(runArgs, "faas-runtime")
-
-			wgCmd := exec.Command("podman", runArgs...)
+			args := argsForRun(ctName)
+			wgCmd := exec.Command("podman", args...)
 			if output, err := wgCmd.CombinedOutput(); err != nil {
 				select {
 				case ch <- fmt.Errorf("failed to start %s: %s: %w", ctName, string(output), err):
@@ -109,17 +79,19 @@ func start(list []string) error {
 }
 
 func Stop(list []string) {
-	slog.Info("Waiting for stopping containers")
+	slog.Info("waiting for stopping containers")
+
 	close(stopChannel)
 
 	var wg sync.WaitGroup
 
 	for _, name := range list {
 		wg.Add(1)
-		go func(containerName string) {
+
+		go func(ctName string) {
 			defer wg.Done()
-			exec.Command("podman", "stop", containerName).Run()
-			exec.Command("podman", "rm", containerName).Run()
+			exec.Command("podman", "stop", ctName).Run()
+			exec.Command("podman", "rm", ctName).Run()
 		}(name)
 	}
 

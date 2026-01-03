@@ -14,7 +14,7 @@ Content-Type: application/json
 ###
 
 ### Test 2: Run Saved Script
-POST http://localhost:8080/run/test/javascript?version=1766922309
+POST http://localhost:8080/run/test/javascript
 Content-Type: application/json
 
 {

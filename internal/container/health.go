@@ -15,7 +15,7 @@ var (
 	removeFromPoolTimeout = 100 * time.Millisecond
 )
 
-func healthCheck(list []string) {
+func checkTimer(list []string) {
 	ticker := time.NewTicker(tickerPeriod)
 	defer ticker.Stop()
 
@@ -24,12 +24,12 @@ func healthCheck(list []string) {
 		case <-stopChannel:
 			return
 		case <-ticker.C:
-			check(list)
+			checkHealth(list)
 		}
 	}
 }
 
-func check(list []string) {
+func checkHealth(list []string) {
 	var wg sync.WaitGroup
 
 	for _, e := range list {
@@ -58,26 +58,26 @@ func check(list []string) {
 				return
 			}
 
-			build(ctName)
+			rebuild(ctName)
 		}(e)
 	}
 
 	wg.Wait()
 }
 
-func isHealth(name string) bool {
+func isHealth(ctName string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), checkHealthTimeout)
 	defer cancel()
 
 	// * check container is running
 	cmd := exec.CommandContext(ctx, "podman", "inspect",
 		"--format", "{{.State.Running}}",
-		name,
+		ctName,
 	)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		slog.Error("failed to check state",
-			slog.String("container", name),
+			slog.String("container", ctName),
 			slog.String("error", err.Error()),
 		)
 		return false
@@ -86,7 +86,7 @@ func isHealth(name string) bool {
 	// * not running
 	if strings.TrimSpace(string(output)) != "true" {
 		slog.Warn("container not running",
-			slog.String("container", name),
+			slog.String("container", ctName),
 		)
 		return false
 	}
@@ -97,12 +97,12 @@ func isHealth(name string) bool {
 	// * check container health status
 	cmd = exec.CommandContext(ctx, "podman", "inspect",
 		"--format", "{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}",
-		name,
+		ctName,
 	)
 	output, err = cmd.CombinedOutput()
 	if err != nil {
 		slog.Error("failed to check health",
-			slog.String("container", name),
+			slog.String("container", ctName),
 			slog.String("error", err.Error()),
 		)
 		return false
@@ -112,7 +112,7 @@ func isHealth(name string) bool {
 	isHealth := status == "no-healthcheck" || status == "healthy" || status == "starting"
 	if !isHealth {
 		slog.Warn("container is unhealthy",
-			slog.String("container", name),
+			slog.String("container", ctName),
 			slog.String("status", status),
 		)
 	}

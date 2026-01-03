@@ -67,7 +67,7 @@ func Init() ([]string, error) {
 		ctPool <- name
 	}
 
-	go healthCheck(ctList)
+	go checkTimer(ctList)
 
 	return ctList, nil
 }
