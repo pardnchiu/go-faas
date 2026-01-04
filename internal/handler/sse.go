@@ -7,22 +7,23 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os/exec"
 	"strings"
+	"time"
 
-	"github.com/pardnchiu/go-faas/internal/container"
+	"github.com/pardnchiu/go-faas/internal/sandbox"
+	"github.com/pardnchiu/go-faas/internal/utils"
 )
 
 type SSE struct {
-	Event string      `json:"event"`
-	Data  interface{} `json:"data"`
-	Type  string      `json:"type,omitempty"`
+	Event string `json:"event"`
+	Data  any    `json:"data"`
+	Type  string `json:"type,omitempty"`
 }
 
 func sendEvent(w http.ResponseWriter, flusher http.Flusher, event, output string) {
 	stream := SSE{Event: event}
 
-	var data interface{}
+	var data any
 	if err := json.Unmarshal([]byte(output), &data); err == nil {
 		switch v := data.(type) {
 		case string:
@@ -61,22 +62,30 @@ func sendDone(w http.ResponseWriter, flusher http.Flusher, event, msg string) {
 }
 
 func runScriptWithSSE(code, lang, input string, w http.ResponseWriter, flusher http.Flusher, clientCtx context.Context) (string, error) {
-	ct, runtime, wrapPath, err := prepareScript(code, lang)
-	defer func() {
-		container.Release(ct)
-	}()
-	if err != nil {
-		return "", err
+	// ct, runtime, wrapPath, err := prepareScript(code, lang)
+	// defer func() {
+	// 	container.Release(ct)
+	// }()
+	// if err != nil {
+	// 	return "", err
+	// }
+	if timeoutScript == 0 {
+		timeoutScript = time.Duration(utils.GetWithDefaultInt("TIMEOUT_SCRIPT", 30)) * time.Second
+		timeoutRequest = timeoutScript + timeoutRedis
 	}
 
 	ctx, execCancel := context.WithTimeout(context.Background(), timeoutRequest)
 	defer execCancel()
 
-	var cmd *exec.Cmd
-	if lang == "python" {
-		cmd = exec.CommandContext(ctx, "podman", "exec", "-i", ct, runtime, "-u", wrapPath)
-	} else {
-		cmd = exec.CommandContext(ctx, "podman", "exec", "-i", ct, runtime, wrapPath)
+	// var cmd *exec.Cmd
+	// if lang == "python" {
+	// 	cmd = exec.CommandContext(ctx, "podman", "exec", "-i", ct, runtime, "-u", wrapPath)
+	// } else {
+	// 	cmd = exec.CommandContext(ctx, "podman", "exec", "-i", ct, runtime, wrapPath)
+	// }
+	cmd, err := sandbox.SandboxCommand(ctx, lang)
+	if err != nil {
+		return "", fmt.Errorf("sandbox command: %w", err)
 	}
 
 	stdin, err := cmd.StdinPipe()

@@ -6,14 +6,13 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pardnchiu/go-faas/internal/container"
 	"github.com/pardnchiu/go-faas/internal/database"
+	"github.com/pardnchiu/go-faas/internal/sandbox"
 	"github.com/pardnchiu/go-faas/internal/utils"
 )
 
@@ -200,34 +199,38 @@ func RunNow(c *gin.Context) {
 	sendResult(c, output)
 }
 
-func prepareScript(code, lang string) (string, string, string, error) {
+// func prepareScript(code, lang string) (string, string, string, error) {
+// 	if timeoutScript == 0 {
+// 		timeoutScript = time.Duration(utils.GetWithDefaultInt("TIMEOUT_SCRIPT", 30)) * time.Second
+// 		timeoutRequest = timeoutScript + timeoutRedis
+// 	}
+
+// 	ctx, cancel := context.WithTimeout(context.Background(), timeoutScript)
+// 	defer cancel()
+
+// 	ct, err := container.Get(ctx)
+// 	if err != nil {
+// 		return "", "", "", fmt.Errorf("failed to get container: %w", err)
+// 	}
+
+// 	runtime := runtimeMap[lang]
+// 	ext := extMap[lang]
+// 	wrapPath := fmt.Sprintf("/app/wrapper%s", ext)
+
+// 	return ct, runtime, wrapPath, nil
+// }
+
+func runScript(code, lang, input string) (string, error) {
+	// ct, runtime, wrapPath, err := prepareScript(code, lang)
+	// defer func() {
+	// 	container.Release(ct)
+	// }()
+	// if err != nil {
+	// 	return "", err
+	// }
 	if timeoutScript == 0 {
 		timeoutScript = time.Duration(utils.GetWithDefaultInt("TIMEOUT_SCRIPT", 30)) * time.Second
 		timeoutRequest = timeoutScript + timeoutRedis
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), timeoutScript)
-	defer cancel()
-
-	ct, err := container.Get(ctx)
-	if err != nil {
-		return "", "", "", fmt.Errorf("failed to get container: %w", err)
-	}
-
-	runtime := runtimeMap[lang]
-	ext := extMap[lang]
-	wrapPath := fmt.Sprintf("/app/wrapper%s", ext)
-
-	return ct, runtime, wrapPath, nil
-}
-
-func runScript(code, lang, input string) (string, error) {
-	ct, runtime, wrapPath, err := prepareScript(code, lang)
-	defer func() {
-		container.Release(ct)
-	}()
-	if err != nil {
-		return "", err
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeoutRequest)
@@ -243,9 +246,14 @@ func runScript(code, lang, input string) (string, error) {
 		return "", fmt.Errorf("failed to marshal payload: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, "podman",
-		"exec", "-i", ct, runtime, wrapPath,
-	)
+	// cmd := exec.CommandContext(ctx, "podman",
+	// 	"exec", "-i", ct, runtime, wrapPath,
+	// )
+	cmd, err := sandbox.SandboxCommand(ctx, lang)
+	if err != nil {
+		return "", fmt.Errorf("sandbox command: %w", err)
+	}
+
 	cmd.Stdin = strings.NewReader(string(payloadBody))
 
 	output, err := cmd.CombinedOutput()
@@ -299,7 +307,7 @@ func cleanOutput(output string) string {
 }
 
 func sendResult(c *gin.Context, output string) {
-	var data interface{}
+	var data any
 	if err := json.Unmarshal([]byte(output), &data); err == nil {
 		switch v := data.(type) {
 		case string:

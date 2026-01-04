@@ -1,3 +1,6 @@
 .DS_Store
 .env
 update.md
+suggest.md
+v*.md
+node_modules

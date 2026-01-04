@@ -1,185 +1,185 @@
 package container
 
-import (
-	"context"
-	"log/slog"
-	"os/exec"
-	"strings"
-	"sync"
-	"time"
-)
+// import (
+// 	"context"
+// 	"log/slog"
+// 	"os/exec"
+// 	"strings"
+// 	"sync"
+// 	"time"
+// )
 
-var (
-	tickerPeriod          = 30 * time.Second
-	checkHealthTimeout    = 5 * time.Second
-	removeFromPoolTimeout = 100 * time.Millisecond
-)
+// var (
+// 	tickerPeriod          = 30 * time.Second
+// 	checkHealthTimeout    = 5 * time.Second
+// 	removeFromPoolTimeout = 100 * time.Millisecond
+// )
 
-func checkTimer(list []string) {
-	ticker := time.NewTicker(tickerPeriod)
-	defer ticker.Stop()
+// func checkTimer(list []string) {
+// 	ticker := time.NewTicker(tickerPeriod)
+// 	defer ticker.Stop()
 
-	for {
-		select {
-		case <-stopChannel:
-			return
-		case <-ticker.C:
-			checkHealth(list)
-		}
-	}
-}
+// 	for {
+// 		select {
+// 		case <-stopChannel:
+// 			return
+// 		case <-ticker.C:
+// 			checkHealth(list)
+// 		}
+// 	}
+// }
 
-func checkHealth(list []string) {
-	var wg sync.WaitGroup
+// func checkHealth(list []string) {
+// 	var wg sync.WaitGroup
 
-	for _, e := range list {
-		wg.Add(1)
+// 	for _, e := range list {
+// 		wg.Add(1)
 
-		go func(ctName string) {
-			defer wg.Done()
+// 		go func(ctName string) {
+// 			defer wg.Done()
 
-			if isHealth(ctName) {
-				return
-			}
+// 			if isHealth(ctName) {
+// 				return
+// 			}
 
-			if !markUnhealthy(ctName) {
-				slog.Debug("already marked: unhealthy",
-					slog.String("container", ctName),
-				)
-				return
-			}
+// 			if !markUnhealthy(ctName) {
+// 				slog.Debug("already marked: unhealthy",
+// 					slog.String("container", ctName),
+// 				)
+// 				return
+// 			}
 
-			removeFromPool(ctName)
+// 			removeFromPool(ctName)
 
-			if !markRebuilding(ctName) {
-				slog.Warn("already in progress: rebuild",
-					slog.String("container", ctName),
-				)
-				return
-			}
+// 			if !markRebuilding(ctName) {
+// 				slog.Warn("already in progress: rebuild",
+// 					slog.String("container", ctName),
+// 				)
+// 				return
+// 			}
 
-			rebuild(ctName)
-		}(e)
-	}
+// 			rebuild(ctName)
+// 		}(e)
+// 	}
 
-	wg.Wait()
-}
+// 	wg.Wait()
+// }
 
-func isHealth(ctName string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), checkHealthTimeout)
-	defer cancel()
+// func isHealth(ctName string) bool {
+// 	ctx, cancel := context.WithTimeout(context.Background(), checkHealthTimeout)
+// 	defer cancel()
 
-	// * check container is running
-	cmd := exec.CommandContext(ctx, "podman", "inspect",
-		"--format", "{{.State.Running}}",
-		ctName,
-	)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		slog.Error("failed to check state",
-			slog.String("container", ctName),
-			slog.String("error", err.Error()),
-		)
-		return false
-	}
+// 	// * check container is running
+// 	cmd := exec.CommandContext(ctx, "podman", "inspect",
+// 		"--format", "{{.State.Running}}",
+// 		ctName,
+// 	)
+// 	output, err := cmd.CombinedOutput()
+// 	if err != nil {
+// 		slog.Error("failed to check state",
+// 			slog.String("container", ctName),
+// 			slog.String("error", err.Error()),
+// 		)
+// 		return false
+// 	}
 
-	// * not running
-	if strings.TrimSpace(string(output)) != "true" {
-		slog.Warn("container not running",
-			slog.String("container", ctName),
-		)
-		return false
-	}
+// 	// * not running
+// 	if strings.TrimSpace(string(output)) != "true" {
+// 		slog.Warn("container not running",
+// 			slog.String("container", ctName),
+// 		)
+// 		return false
+// 	}
 
-	ctx, cancel = context.WithTimeout(context.Background(), checkHealthTimeout)
-	defer cancel()
+// 	ctx, cancel = context.WithTimeout(context.Background(), checkHealthTimeout)
+// 	defer cancel()
 
-	// * check container health status
-	cmd = exec.CommandContext(ctx, "podman", "inspect",
-		"--format", "{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}",
-		ctName,
-	)
-	output, err = cmd.CombinedOutput()
-	if err != nil {
-		slog.Error("failed to check health",
-			slog.String("container", ctName),
-			slog.String("error", err.Error()),
-		)
-		return false
-	}
+// 	// * check container health status
+// 	cmd = exec.CommandContext(ctx, "podman", "inspect",
+// 		"--format", "{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}",
+// 		ctName,
+// 	)
+// 	output, err = cmd.CombinedOutput()
+// 	if err != nil {
+// 		slog.Error("failed to check health",
+// 			slog.String("container", ctName),
+// 			slog.String("error", err.Error()),
+// 		)
+// 		return false
+// 	}
 
-	status := strings.TrimSpace(string(output))
-	isHealth := status == "no-healthcheck" || status == "healthy" || status == "starting"
-	if !isHealth {
-		slog.Warn("container is unhealthy",
-			slog.String("container", ctName),
-			slog.String("status", status),
-		)
-	}
+// 	status := strings.TrimSpace(string(output))
+// 	isHealth := status == "no-healthcheck" || status == "healthy" || status == "starting"
+// 	if !isHealth {
+// 		slog.Warn("container is unhealthy",
+// 			slog.String("container", ctName),
+// 			slog.String("status", status),
+// 		)
+// 	}
 
-	return true
-}
+// 	return true
+// }
 
-func markUnhealthy(name string) bool {
-	ctStatesMu.RLock()
-	info, exists := ctStates[name]
-	ctStatesMu.RUnlock()
+// func markUnhealthy(name string) bool {
+// 	ctStatesMu.RLock()
+// 	info, exists := ctStates[name]
+// 	ctStatesMu.RUnlock()
 
-	if !exists {
-		return false
-	}
+// 	if !exists {
+// 		return false
+// 	}
 
-	info.mu.Lock()
-	defer info.mu.Unlock()
+// 	info.mu.Lock()
+// 	defer info.mu.Unlock()
 
-	if info.State == StateIdle || info.State == StateAcquired {
-		info.State = StateUnhealthy
-		return true
-	}
+// 	if info.State == StateIdle || info.State == StateAcquired {
+// 		info.State = StateUnhealthy
+// 		return true
+// 	}
 
-	return false
-}
+// 	return false
+// }
 
-func removeFromPool(name string) {
-	size := cap(ctPool)
-	idx := 0
+// func removeFromPool(name string) {
+// 	size := cap(ctPool)
+// 	idx := 0
 
-	for idx < size {
-		select {
-		case ct := <-ctPool:
-			if ct != name {
-				// * try put back to pool, if the pool is not full, and not to wait
-				select {
-				case ctPool <- ct:
-				default:
-				}
-			}
-			idx++
-		case <-time.After(removeFromPoolTimeout):
-			slog.Warn("timeout: removing from pool",
-				slog.String("container", name),
-			)
-			return
-		}
-	}
-}
+// 	for idx < size {
+// 		select {
+// 		case ct := <-ctPool:
+// 			if ct != name {
+// 				// * try put back to pool, if the pool is not full, and not to wait
+// 				select {
+// 				case ctPool <- ct:
+// 				default:
+// 				}
+// 			}
+// 			idx++
+// 		case <-time.After(removeFromPoolTimeout):
+// 			slog.Warn("timeout: removing from pool",
+// 				slog.String("container", name),
+// 			)
+// 			return
+// 		}
+// 	}
+// }
 
-func markRebuilding(name string) bool {
-	ctStatesMu.RLock()
-	info, exists := ctStates[name]
-	ctStatesMu.RUnlock()
+// func markRebuilding(name string) bool {
+// 	ctStatesMu.RLock()
+// 	info, exists := ctStates[name]
+// 	ctStatesMu.RUnlock()
 
-	if !exists {
-		return false
-	}
+// 	if !exists {
+// 		return false
+// 	}
 
-	info.mu.Lock()
-	defer info.mu.Unlock()
+// 	info.mu.Lock()
+// 	defer info.mu.Unlock()
 
-	if info.State != StateUnhealthy {
-		return false
-	}
+// 	if info.State != StateUnhealthy {
+// 		return false
+// 	}
 
-	info.State = StateRebuilding
-	return true
-}
+// 	info.State = StateRebuilding
+// 	return true
+// }
