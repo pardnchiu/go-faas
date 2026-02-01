@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -17,23 +18,19 @@ import (
 )
 
 type RunBody struct {
-	Input  string `json:"input"`
-	Stream bool   `json:"stream"`
-}
-
-type RunNowBody struct {
-	Code     string `json:"code" binding:"required"`
-	Language string `json:"language" binding:"required"`
+	Code     string `json:"code"`
+	Language string `json:"language"`
 	Input    string `json:"input"`
 	Stream   bool   `json:"stream"`
 }
 
 var (
-	timeoutRedis   = 5 * time.Second
-	timeoutScript  time.Duration
-	timeoutRequest time.Duration
-	codeMaxSize    int64
-	extMap         = map[string]string{
+	timeoutRedis    = 5 * time.Second
+	timeoutScript   time.Duration
+	timeoutRequest  time.Duration
+	codeMaxSize     int64
+	codeMaxSizeOnce sync.Once
+	extMap          = map[string]string{
 		"python":     ".py",
 		"javascript": ".js",
 		"typescript": ".ts",
@@ -59,17 +56,9 @@ func Run(c *gin.Context) {
 		}
 	}
 
-	if codeMaxSize == 0 {
-		codeMaxSize = int64(utils.GetWithDefaultInt("CODE_MAX_SIZE", 256<<10))
-	}
-
-	var body RunBody
-
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, codeMaxSize)
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.String(http.StatusBadRequest,
-			fmt.Sprintf("bad request: %s", err.Error()),
-		)
+	body, err := getRunBody(c)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -84,55 +73,24 @@ func Run(c *gin.Context) {
 		return
 	}
 
-	if body.Stream {
-		c.Writer.Header().Set("Content-Type", "text/event-stream")
-		c.Writer.Header().Set("Cache-Control", "no-cache")
-		c.Writer.Header().Set("Connection", "keep-alive")
+	body.Code = script.Code
+	body.Language = script.Language
 
-		flusher, ok := c.Writer.(http.Flusher)
-		if !ok {
-			c.String(http.StatusInternalServerError,
-				"streaming unsupported",
-			)
-			return
-		}
+	slog.Info("run request",
+		"body_language", body.Language,
+		"body_code_size", len(body.Code),
+		"body_input_size", len(body.Input),
+		"script_path", targetPath)
+	fmt.Printf("Code:\n")
+	fmt.Printf("%s\n\n", body.Code)
 
-		ctx := c.Request.Context()
-
-		flusher.Flush()
-
-		res, err := runScriptWithSSE(script.Code, script.Language, body.Input, c.Writer, flusher, ctx)
-		if err != nil {
-			sendDone(c.Writer, flusher, "error", strings.ReplaceAll(err.Error(), "\n", " "))
-			return
-		}
-		sendDone(c.Writer, flusher, "result", strings.ReplaceAll(res, "\n", " "))
-		return
-	}
-
-	output, err := runScript(script.Code, script.Language, body.Input)
-	if err != nil {
-		c.String(http.StatusInternalServerError,
-			fmt.Sprintf("failed to run: %s", err.Error()),
-		)
-		return
-	}
-
-	sendResult(c, output)
+	run(c, body)
 }
 
 func RunNow(c *gin.Context) {
-	if codeMaxSize == 0 {
-		codeMaxSize = int64(utils.GetWithDefaultInt("CODE_MAX_SIZE", 256<<10))
-	}
-
-	var body RunNowBody
-
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, codeMaxSize)
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.String(http.StatusBadRequest,
-			fmt.Sprintf("bad request: %s", err.Error()),
-		)
+	body, err := getRunBody(c)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -162,12 +120,31 @@ func RunNow(c *gin.Context) {
 		fmt.Printf("%s\n", body.Input)
 	}
 
-	if body.Stream {
-		c.Writer.Header().Set("Content-Type", "text/event-stream")
-		c.Writer.Header().Set("Cache-Control", "no-cache")
-		c.Writer.Header().Set("Connection", "keep-alive")
+	run(c, body)
+}
 
-		flusher, ok := c.Writer.(http.Flusher)
+func getRunBody(c *gin.Context) (*RunBody, error) {
+	getCodeMaxSize()
+
+	var body RunBody
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, codeMaxSize)
+	if err := c.ShouldBindJSON(&body); err != nil {
+		return nil, fmt.Errorf("bad request: %s", err.Error())
+	}
+	return &body, nil
+}
+
+func getCodeMaxSize() int64 {
+	codeMaxSizeOnce.Do(func() {
+		codeMaxSize = int64(utils.GetWithDefaultInt("CODE_MAX_SIZE", 256<<10))
+	})
+	return codeMaxSize
+}
+
+func run(c *gin.Context, body *RunBody) {
+
+	if body.Stream {
+		flusher, ok := setStream(c)
 		if !ok {
 			c.String(http.StatusInternalServerError,
 				"streaming unsupported",
@@ -176,8 +153,6 @@ func RunNow(c *gin.Context) {
 		}
 
 		ctx := c.Request.Context()
-
-		flusher.Flush()
 
 		res, err := runScriptWithSSE(body.Code, body.Language, body.Input, c.Writer, flusher, ctx)
 		if err != nil {
@@ -199,35 +174,22 @@ func RunNow(c *gin.Context) {
 	sendResult(c, output)
 }
 
-// func prepareScript(code, lang string) (string, string, string, error) {
-// 	if timeoutScript == 0 {
-// 		timeoutScript = time.Duration(utils.GetWithDefaultInt("TIMEOUT_SCRIPT", 30)) * time.Second
-// 		timeoutRequest = timeoutScript + timeoutRedis
-// 	}
+func setStream(c *gin.Context) (http.Flusher, bool) {
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
 
-// 	ctx, cancel := context.WithTimeout(context.Background(), timeoutScript)
-// 	defer cancel()
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		return nil, false
+	}
 
-// 	ct, err := container.Get(ctx)
-// 	if err != nil {
-// 		return "", "", "", fmt.Errorf("failed to get container: %w", err)
-// 	}
+	flusher.Flush()
 
-// 	runtime := runtimeMap[lang]
-// 	ext := extMap[lang]
-// 	wrapPath := fmt.Sprintf("/app/wrapper%s", ext)
-
-// 	return ct, runtime, wrapPath, nil
-// }
+	return flusher, true
+}
 
 func runScript(code, lang, input string) (string, error) {
-	// ct, runtime, wrapPath, err := prepareScript(code, lang)
-	// defer func() {
-	// 	container.Release(ct)
-	// }()
-	// if err != nil {
-	// 	return "", err
-	// }
 	if timeoutScript == 0 {
 		timeoutScript = time.Duration(utils.GetWithDefaultInt("TIMEOUT_SCRIPT", 30)) * time.Second
 		timeoutRequest = timeoutScript + timeoutRedis
@@ -246,9 +208,6 @@ func runScript(code, lang, input string) (string, error) {
 		return "", fmt.Errorf("failed to marshal payload: %w", err)
 	}
 
-	// cmd := exec.CommandContext(ctx, "podman",
-	// 	"exec", "-i", ct, runtime, wrapPath,
-	// )
 	cmd, err := sandbox.SandboxCommand(ctx, lang)
 	if err != nil {
 		return "", fmt.Errorf("sandbox command: %w", err)

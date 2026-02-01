@@ -1,6 +1,13 @@
+# macOS
 .DS_Store
+
+# 環境變數
 .env
+
+# 筆記檔案
 update.md
-suggest.md
+suggest*.md
 v*.md
+
+# Node.js
 node_modules

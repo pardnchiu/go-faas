@@ -62,13 +62,6 @@ func sendDone(w http.ResponseWriter, flusher http.Flusher, event, msg string) {
 }
 
 func runScriptWithSSE(code, lang, input string, w http.ResponseWriter, flusher http.Flusher, clientCtx context.Context) (string, error) {
-	// ct, runtime, wrapPath, err := prepareScript(code, lang)
-	// defer func() {
-	// 	container.Release(ct)
-	// }()
-	// if err != nil {
-	// 	return "", err
-	// }
 	if timeoutScript == 0 {
 		timeoutScript = time.Duration(utils.GetWithDefaultInt("TIMEOUT_SCRIPT", 30)) * time.Second
 		timeoutRequest = timeoutScript + timeoutRedis
@@ -77,12 +70,6 @@ func runScriptWithSSE(code, lang, input string, w http.ResponseWriter, flusher h
 	ctx, execCancel := context.WithTimeout(context.Background(), timeoutRequest)
 	defer execCancel()
 
-	// var cmd *exec.Cmd
-	// if lang == "python" {
-	// 	cmd = exec.CommandContext(ctx, "podman", "exec", "-i", ct, runtime, "-u", wrapPath)
-	// } else {
-	// 	cmd = exec.CommandContext(ctx, "podman", "exec", "-i", ct, runtime, wrapPath)
-	// }
 	cmd, err := sandbox.SandboxCommand(ctx, lang)
 	if err != nil {
 		return "", fmt.Errorf("sandbox command: %w", err)

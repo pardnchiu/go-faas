@@ -40,17 +40,23 @@ func SandboxCommand(ctx context.Context, lang string) (*exec.Cmd, error) {
 		"--ro-bind", "/usr", "/usr",
 		"--ro-bind", "/lib", "/lib",
 		"--ro-bind", "/lib64", "/lib64",
-		"--ro-bind", "/bin", "/bin",
-		"--ro-bind", "/sbin", "/sbin",
 		"--ro-bind", wrapperPath, sandboxPath,
 		"--tmpfs", "/tmp",
 		"--proc", "/proc",
 		"--dev", "/dev",
 		"--unshare-all",
-		"--share-net",
+		"--unshare-net",
 		"--die-with-parent",
-		"--setenv", "HOME", "/tmp",
+		"--new-session",
+		"--cap-drop", "ALL",
+		"--chdir", "/tmp",
+		"--tmpfs", "/home/sandbox",
+		"--setenv", "HOME", "/home/sandbox",
 		"--setenv", "PATH", "/usr/local/bin:/usr/bin:/bin",
+		"--setenv", "TMPDIR", "/tmp",
+		"--setenv", "LANG", "C.UTF-8",
+		"--unsetenv", "LD_PRELOAD",
+		"--unsetenv", "LD_LIBRARY_PATH",
 	}
 
 	if lang == "typescript" {
@@ -83,6 +89,5 @@ func SandboxCommand(ctx context.Context, lang string) (*exec.Cmd, error) {
 	}
 	args = append(args, baseArgs...)
 
-	// return exec.CommandContext(ctx, baseArgs[0], baseArgs[1:]...)
 	return exec.CommandContext(ctx, "systemd-run", args...), nil
 }
