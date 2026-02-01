@@ -6,8 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-
-	"github.com/pardnchiu/go-faas/internal/utils"
 )
 
 var (
@@ -76,14 +74,9 @@ func SandboxCommand(ctx context.Context, lang string) (*exec.Cmd, error) {
 		baseArgs = append(baseArgs, runtime, sandboxPath)
 	}
 
-	maxCPU := utils.GetWithDefaultInt("MAX_CPUS", 1)
-	maxMemory := utils.GetWithDefault("MAX_MEMORY", "128M")
-
 	args := []string{
 		"--scope", "--user", "--quiet",
-		"-p", fmt.Sprintf("CPUQuota=%d%%", maxCPU*100),
-		"-p", fmt.Sprintf("MemoryMax=%s", maxMemory),
-		"-p", "MemorySwapMax=0",
+		"--slice=go-faas-slice",
 		"--",
 		"bwrap",
 	}

@@ -1,274 +1,272 @@
+> [!NOTE]
+> 此 README 由 [Claude Code](https://github.com/pardnchiu/skill-readme-generate) 生成，英文版請參閱 [這裡](./README.md)。
+
 ![cover](./cover.png)
 
-> [!TIP]
-> 專案下一步方向：將移除 Podman 依賴，改以 Native Sandbox（如 seccomp、chroot、namespace、資源限制等）方式隔離腳本執行，簡化部署的同時提升效能。
-
-# Go FaaS
+# go-faas
 
 [![pkg](https://pkg.go.dev/badge/github.com/pardnchiu/go-faas.svg)](https://pkg.go.dev/github.com/pardnchiu/go-faas)
 [![card](https://goreportcard.com/badge/github.com/pardnchiu/go-faas)](https://goreportcard.com/report/github.com/pardnchiu/go-faas)
 [![version](https://img.shields.io/github/v/tag/pardnchiu/go-faas?label=release)](https://github.com/pardnchiu/go-faas/releases)
 [![license](https://img.shields.io/github/license/pardnchiu/go-faas)](LICENSE)
 
-> 輕量的 Golang FaaS 平台，提供 JavaScript、TypeScript 與 Python 腳本的隔離執行環境，支援即時執行與版本管理，使用 Podman 容器保護主機安全
+> 輕量的 Golang FaaS 平台，提供 JavaScript、TypeScript 與 Python 腳本的隔離執行環境。使用 bubblewrap 沙箱與 systemd-run 資源限制，無需容器即可安全執行使用者腳本。
 
-- [三大核心特色](#三大核心特色)
-    - [多語言支援](#多語言支援)
-    - [容器隔離](#容器隔離)
-    - [智慧管理](#智慧管理)
+## 目錄
+
+- [功能特點](#功能特點)
 - [系統架構](#系統架構)
-- [依賴套件](#依賴套件)
-- [環境需求](#環境需求)
+- [安裝](#安裝)
 - [使用方法](#使用方法)
-    - [安裝](#安裝)
-    - [啟動服務](#啟動服務)
-    - [容器配置](#容器配置)
-- [API](#api)
-    - [上傳腳本](#上傳腳本)
-    - [執行已上傳的腳本](#執行已上傳的腳本)
-    - [直接執行腳本](#直接執行腳本)
-    - [串流執行 (stream)](#串流執行-stream)
-- [腳本類型](#腳本類型)
-    - [JavaScript](#javascript)
-    - [TypeScript](#typescript)
-    - [Python](#python)
-- [配置說明](#配置說明)
-- [授權條款](#授權條款)
-- [作者](#作者)
-- [星](#星)
+- [API 參考](#api-參考)
+- [腳本範例](#腳本範例)
+- [授權](#授權)
+- [Author](#author)
+- [Stars](#stars)
 
-## 三大核心特色
+## 功能特點
 
-### 多語言支援
-支援 JavaScript、TypeScript 和 Python 腳本執行，透過統一的 JSON 格式進行參數傳遞與結果回傳
-
-### 容器隔離
-使用 Podman 容器池隔離執行環境，保護主機系統安全，每個請求在獨立容器中執行，避免交叉干擾
-
-### 智慧管理
-自動檢測容器健康狀態並重建不健康容器，動態容器池管理與自動釋放機制，確保高可用性
+- **多語言支援**：支援 JavaScript、TypeScript 及 Python 腳本執行，透過統一的 JSON 格式進行參數傳遞與結果回傳
+- **沙箱隔離**：使用 bubblewrap (bwrap) 搭配 Linux namespace 隔離執行環境，保護主機系統安全
+- **資源限制**：透過 systemd-run 控制 CPU 與記憶體用量，防止惡意腳本耗盡系統資源
+- **版本管理**：腳本上傳後自動版本化儲存於 Redis，可指定版本執行或使用最新版
+- **串流輸出**：支援 SSE 串流模式，即時追蹤腳本執行進度與日誌輸出
 
 ## 系統架構
 
 ```mermaid
 flowchart TD
-    A[HTTP 請求] --> B{路由分發}
-    B -->|POST /upload| C[腳本上傳]
-    B -->|POST /run/*| D[執行已保存腳本]
-    B -->|POST /run-now| E[即時執行]
-    
-    C --> F[驗證腳本]
-    F --> G[Redis 版本儲存]
-    
-    D --> H[從 Redis 獲取腳本]
-    H --> I[容器池獲取]
-    
-    E --> I
-    
-    I --> J{容器狀態檢查}
-    J -->|健康| K[執行腳本]
-    J -->|不健康| L[重建容器]
-    L --> K
-    
-    K --> M[返回結果]
-    M --> N[回歸容器池]
-    
-    O[健康檢查 Goroutine] -.->|定期檢查| P[容器狀態]
-    P -.->|異常| L
+    subgraph HTTP["HTTP Layer"]
+        A[HTTP 請求] --> B{Gin Router}
+        B -->|POST /upload| C[Upload Handler]
+        B -->|POST /run/*| D[Run Handler]
+        B -->|POST /run-now| E[RunNow Handler]
+    end
+
+    subgraph Storage["Storage Layer"]
+        C --> F[驗證語言/路徑]
+        F --> G[(Redis)]
+        G -->|meta:hash| H[路徑/語言/最新版本]
+        G -->|code:hash:ts| I[腳本原始碼]
+    end
+
+    subgraph Execution["Execution Layer"]
+        D --> J[從 Redis 取得腳本]
+        J --> K[建立沙箱指令]
+        E --> K
+
+        K --> L[systemd-run]
+        L -->|CPUQuota| M[CPU 限制]
+        L -->|MemoryMax| N[記憶體限制]
+
+        L --> O[bubblewrap]
+        O -->|--unshare-all| P[Namespace 隔離]
+        O -->|--unshare-net| Q[網路隔離]
+        O -->|--ro-bind| R[唯讀掛載 /usr /lib]
+        O -->|--cap-drop ALL| S[移除所有 Capabilities]
+    end
+
+    subgraph Runtime["Runtime Layer"]
+        O --> T{語言判斷}
+        T -->|javascript| U[node wrapper.js]
+        T -->|typescript| V[tsx wrapper.ts]
+        T -->|python| W[python3 wrapper.py]
+
+        U --> X[stdin: JSON payload]
+        V --> X
+        W --> X
+        X --> Y[執行使用者腳本]
+        Y --> Z[stdout: 執行結果]
+    end
+
+    Z --> AA{串流模式?}
+    AA -->|是| AB[SSE 串流回應]
+    AA -->|否| AC[JSON 回應]
 ```
 
-## 依賴套件
+## 安裝
 
-- [`github.com/gin-gonic/gin`](https://github.com/gin-gonic/gin)
-- [`github.com/redis/go-redis/v9`](https://github.com/redis/go-redis)
-- [`github.com/joho/godotenv`](https://github.com/joho/godotenv)
-
-## 環境需求
+### 環境需求
 
 - Go 1.23.0+
-- Podman
 - Redis 6.0+
+- Linux（需要 bubblewrap 與 systemd）
+- Node.js 22+
+- Python 3.10+
 
-## 使用方法
-
-### 安裝
+### 系統依賴安裝
 
 ```bash
-# Clone 專案
+# Ubuntu / Debian
+sudo apt update
+sudo apt install -y bubblewrap redis-server nodejs npm python3
+
+# Fedora / RHEL
+sudo dnf install -y bubblewrap redis nodejs npm python3
+
+# Arch Linux
+sudo pacman -S bubblewrap redis nodejs npm python
+```
+
+### 安裝步驟
+
+```bash
 git clone https://github.com/pardnchiu/go-faas.git
 cd go-faas
 
-# 安裝依賴
+# 安裝 Go 依賴
 go mod download
+
+# 安裝 Node.js 依賴（esbuild 用於 TypeScript 編譯）
+npm install
+
+# 安裝 tsx（TypeScript 執行器）
+npm install -g tsx
 ```
 
 ### 啟動服務
 
 ```bash
-# 啟動 Redis (必須)
-podman run -d --name redis -p 6379:6379 redis:alpine
+# 確保 Redis 服務已啟動
 
-# 啟動服務
+# 啟動 FaaS 服務
 go run cmd/api/main.go
 ```
 
-### 容器配置
+### 環境變數
 
-```env
-# 預設 runtime.NumCPU() * 2
-MAX_CONTAINERS=4
-# 預設 0.25
-MAX_CPUS_PER_CONTAINER=
-# 預設 128 << 20 (128MB)
-MAX_MEMORY_PER_CONTAINER=
-# 預設 false, 若有 Nvidia GPU 可以設定 true
-GPU_ENABLED=
-# 預設 8080
-HTTP_PORT=
-# 預設 256 << 10 (256KB)
-CODE_MAX_SIZE=
-# 預設 30 (s)
-TIMEOUT_SCRIPT=
+| 變數 | 預設值 | 說明 |
+|------|--------|------|
+| `HTTP_PORT` | `8080` | HTTP 服務埠 |
+| `MAX_CPUS` | `1` | 每個沙箱 CPU 配額（100% = 1 core） |
+| `MAX_MEMORY` | `128M` | 每個沙箱記憶體上限 |
+| `CODE_MAX_SIZE` | `262144` | 程式碼最大尺寸（bytes） |
+| `TIMEOUT_SCRIPT` | `30` | 腳本執行逾時（秒） |
+| `REDIS_HOST` | `localhost` | Redis 主機 |
+| `REDIS_PORT` | `6379` | Redis 埠 |
+| `REDIS_PASSWORD` | 空 | Redis 密碼 |
+| `REDIS_DB` | `0` | Redis 資料庫編號 |
 
-# 預設 localhost
-REDIS_HOST=
-# 預設 6379
-REDIS_PORT=
-# 預設空
-REDIS_PASSWORD=
-# 預設 0
-REDIS_DB=
+## 使用方法
+
+### 即時執行腳本
+
+```bash
+curl -X POST http://localhost:8080/run-now \
+  -H "Content-Type: application/json" \
+  -d '{
+    "language": "javascript",
+    "code": "return { sum: event.a + event.b };",
+    "input": "{\"a\": 10, \"b\": 5}"
+  }'
 ```
 
+回應：
 
-## API
+```json
+{
+  "data": { "sum": 15 },
+  "type": "json"
+}
+```
 
-### 上傳腳本
+### 上傳並執行腳本
 
-- POST: `/upload` 
-- 支援語言: 
-    - `javascript`
-    - `typescript`
-    - `python`
-- 請求範例
-    ```json
-    {
-      "path": "test/calculator",
-      "language": "javascript",
-      "code": "return JSON.stringify({ sum: event.a + event.b });"
-    }
-    ```
-- 回應範例
-    ```json
-    {
-      "path": "test/calculator",
-      "language": "javascript",
-      "version": 1735286400000
-    }
-    ```
+```bash
+# 上傳腳本
+curl -X POST http://localhost:8080/upload \
+  -H "Content-Type: application/json" \
+  -d '{
+    "path": "math/add",
+    "language": "javascript",
+    "code": "return { result: event.a + event.b };"
+  }'
 
-### 執行已上傳的腳本
-- POST: `/run/{path}`
-- 參數
-    - `version` (可選): 指定腳本版本時間戳，預設使用最新版本
-- 請求範例
-    ```json
-    // 以 `/run/test/calculator` 為範例
-    {
-      "input": {
-        "a": 10,
-        "b": 5
-      }
-    }
-    ```
-- 回應範例
-    ```json
-    {
-      "data": {
-        "sum": 15
-      },
-      "type": "json"
-    }
-    ```
+# 執行已儲存腳本
+curl -X POST http://localhost:8080/run/math/add \
+  -H "Content-Type: application/json" \
+  -d '{ "input": { "a": 10, "b": 5 } }'
+```
 
-### 直接執行腳本
-- POST: `/run-now`
-- 請求範例
+### 串流模式
 
-    ```json
-    {
-      "language": "python",
-      "code": "import json\nresult = {'sum': event['a'] + event['b']}\nreturn json.dumps(result)",
-      "input": "{\"a\": 10, \"b\": 5}"
-    }
-    ```
-    回應範例
-    ```json
-    {
-      "data": {
-        "sum": 15
-      },
-      "type": "json"
-    }
-    ```
+```bash
+curl -X POST http://localhost:8080/run-now \
+  -H "Content-Type: application/json" \
+  -d '{
+    "language": "python",
+    "code": "import json\nfor i in range(3):\n  print(json.dumps({\"progress\": i}))\nreturn {\"done\": True}",
+    "input": "{}",
+    "stream": true
+  }'
+```
 
-### 串流執行 (stream)
+## API 參考
 
-- POST: `/run-now`
-- 支援語言: `javascript`、`typescript`、`python`
-- 用途：用於需要追蹤日誌輸出，回應為 SSE 格式。
-- 啟用串流需於請求 body 加入 `"stream": true`。
-- 請求範例
-    ```json
-    {
-      "language": "python",
-      "code": "import json\nfor i in range(3):\n  print(json.dumps({'progress': i*50}))\nresult = {'sum': event['a'] + event['b']}\nprint(json.dumps({'sum': result['sum'], 'done': True}))",
-      "input": "{\"a\": 10, \"b\": 5}",
-      "stream": true
-    }
-    ```
-- 回應範例 (SSE)
-    ```text
-    data: {"event":"log","data":"Progress: 0%","type":"text"}
+### POST /upload
 
-    data: {"event":"log","data":"Progress: 10%","type":"text"}
+上傳腳本並儲存至 Redis。
 
-    data: {"event":"log","data":"Progress: 20%","type":"text"}
+**請求 Body：**
 
-    data: {"event":"log","data":"Progress: 30%","type":"text"}
+| 欄位 | 類型 | 必填 | 說明 |
+|------|------|------|------|
+| `path` | string | 是 | 腳本路徑識別碼 |
+| `language` | string | 是 | `javascript`、`typescript` 或 `python` |
+| `code` | string | 是 | 腳本原始碼 |
 
-    data: {"event":"log","data":"Progress: 40%","type":"text"}
+**回應：**
 
-    data: {"event":"log","data":"Progress: 50%","type":"text"}
+```json
+{
+  "path": "math/add",
+  "language": "javascript",
+  "version": 1735286400
+}
+```
 
-    data: {"event":"log","data":"Progress: 60%","type":"text"}
+### POST /run/{path}
 
-    data: {"event":"log","data":"Progress: 70%","type":"text"}
+執行已上傳的腳本。
 
-    data: {"event":"log","data":"Progress: 80%","type":"text"}
+**Query 參數：**
 
-    data: {"event":"log","data":"Progress: 90%","type":"text"}
+| 參數 | 說明 |
+|------|------|
+| `version` | 指定版本時間戳（選填，預設最新版） |
 
-    data: {"event":"result","data":"Complete","type":"string"}
-    ```
+**請求 Body：**
 
-  > [!NOTE]
-  > stream 介面會依腳本執行進度多次推送資料，最後一筆通常帶有 `event: result` 表示結束。
+| 欄位 | 類型 | 說明 |
+|------|------|------|
+| `input` | object/string | 傳遞給腳本的輸入資料 |
+| `stream` | boolean | 啟用 SSE 串流模式 |
 
-## 腳本類型
+### POST /run-now
 
-> [!NOTE]
-> 所有腳本透過 `event` 變數接收輸入資料
+即時執行腳本，不儲存。
+
+**請求 Body：**
+
+| 欄位 | 類型 | 必填 | 說明 |
+|------|------|------|------|
+| `language` | string | 是 | `javascript`、`typescript` 或 `python` |
+| `code` | string | 是 | 腳本原始碼 |
+| `input` | string | 否 | JSON 格式輸入資料 |
+| `stream` | boolean | 否 | 啟用 SSE 串流模式 |
+
+## 腳本範例
+
+所有腳本透過 `event` 變數接收輸入資料。
 
 ### JavaScript
 
 ```javascript
-// 輸入透過 event 變數提供
 const result = {
   sum: event.a + event.b,
   product: event.a * event.b
 };
-return result
+return result;
 ```
 
 ### TypeScript
@@ -289,8 +287,6 @@ return result;
 ### Python
 
 ```python
-import json
-
 result = {
     'sum': event['a'] + event['b'],
     'product': event['a'] * event['b']
@@ -298,19 +294,11 @@ result = {
 return result
 ```
 
-## 配置說明
-
-超時
-- 腳本執行: 30 秒 (預設)
-
-請求限制
-- 最大 `256KB` (預設)
-
-## 授權條款
+## 授權
 
 此專案採用 [MIT](LICENSE) 授權條款。
 
-## 作者
+## Author
 
 <img src="https://avatars.githubusercontent.com/u/25631760" align="left" width="96" height="96" style="margin-right: 0.5rem;">
 
@@ -318,15 +306,14 @@ return result
 
 <a href="mailto:dev@pardn.io" target="_blank">
 <img src="https://pardn.io/image/email.svg" width="48" height="48">
-</a>
-<a href="https://linkedin.com/in/pardnchiu" target="_blank">
+</a> <a href="https://linkedin.com/in/pardnchiu" target="_blank">
 <img src="https://pardn.io/image/linkedin.svg" width="48" height="48">
 </a>
 
-## 星
+## Stars
 
 [![Star](https://api.star-history.com/svg?repos=pardnchiu/go-faas&type=Date)](https://www.star-history.com/#pardnchiu/go-faas&Date)
 
 ***
 
-©️ 2025 [邱敬幃 Pardn Chiu](https://pardn.io)
+©️ 2025 [邱敬幃 Pardn Chiu](https://linkedin.com/in/pardnchiu)

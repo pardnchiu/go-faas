@@ -12,6 +12,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/pardnchiu/go-faas/internal"
 	"github.com/pardnchiu/go-faas/internal/database"
+	"github.com/pardnchiu/go-faas/internal/sandbox"
 )
 
 func init() {
@@ -27,26 +28,13 @@ func main() {
 	}
 	defer database.Close()
 
-	// Initialize Docker/Podman container pool
-	// ctList, err := container.Init()
-	// if err != nil {
-	// 	log.Fatalf("Failed to initialize container pool: %v", err)
-	// }
+	if err := sandbox.NewSlice(); err != nil {
+		slog.Warn("failed to initialize slice", "error", err)
+	}
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	// go func() {
-	// 	<-sigChan
-	// 	slog.Info("Received shutdown signal, cleaning up...")
-	// 	// container.Stop(ctList)
-	// }()
-
-	// Start HTTP server
-	// slog.Info("Starting FaaS service on :8080")
-	// if err := internal.InitRouter(); err != nil {
-	// 	log.Fatalf("Failed to start server: %v", err)
-	// }
 	srv := internal.CreateServer()
 
 	go func() {
