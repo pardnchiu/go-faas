@@ -11,6 +11,7 @@ import (
 
 	"github.com/joho/godotenv"
 	"github.com/pardnchiu/go-faas/internal"
+	"github.com/pardnchiu/go-faas/internal/checker"
 	"github.com/pardnchiu/go-faas/internal/database"
 	"github.com/pardnchiu/go-faas/internal/sandbox"
 )
@@ -22,6 +23,12 @@ func init() {
 }
 
 func main() {
+	err := checker.CheckPackage()
+	if err != nil {
+		slog.Error("failed to get OS name", "error", err)
+		os.Exit(1)
+	}
+
 	if err := database.Init(); err != nil {
 		slog.Error("failed to initialize db", "error", err)
 		os.Exit(1)
