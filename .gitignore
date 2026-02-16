@@ -1,13 +1,7 @@
-# macOS
 .DS_Store
-
-# 環境變數
 .env
+.config
+.doc
+*.out
 
-# 筆記檔案
-update.md
-suggest*.md
-v*.md
-
-# Node.js
 node_modules
